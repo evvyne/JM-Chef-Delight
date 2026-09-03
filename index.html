@@ -722,7 +722,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
         return '<div class="quick-tile" data-inv-item="' + i.id + '">' +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
-          '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + ' · cost ' + fmt(i.unitCost) + '</div>' +
+          '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
           '<div class="qt-stock' + (low ? ' low' : '') + '">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' at stall' + (low ? ' · low!' : '') + '</div>' +
           '<div class="qt-stock">🏬 ' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
           '</div>';
@@ -745,7 +745,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
+          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
 
           '<div class="field"><label for="invEditReorder">Reorder at</label><select id="invEditReorder">' + reorderOptionsHtml(item.reorder) + '</select></div>' +
           '<div class="field"><label for="invEditQty">Qty at stall (' + esc(item.unit) + ', for a manual correction)</label><input class="big-input" id="invEditQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.qty + '"></div>' +
@@ -844,10 +844,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(!items.length) return;
       html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
       html += '<div class="quick-grid">' + items.map(function(i){
+        var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
         return '<div class="quick-tile" data-wh-item="' + i.id + '">' +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
-          '<div class="qt-price">' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
-          '<div class="qt-stock">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' already at stall</div>' +
+          '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + ' · cost ' + fmt(i.unitCost) + '</div>' +
+          '<div class="qt-stock">🏬 ' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
+          '<div class="qt-stock">🚚 ' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' already at stall</div>' +
           '</div>';
       }).join('') + '</div>';
     });
@@ -868,7 +870,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall</div>' +
+          '<div class="modal-sub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + '</div>' +
 
           '<div class="section-title" style="font-size:.85rem; margin:0;">Bought from supplier</div>' +
           '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
