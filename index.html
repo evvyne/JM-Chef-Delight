@@ -764,22 +764,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
                '</div>')
             : '<div class="empty-note">Nothing left at the stall to return.</div>') +
 
-          '<div class="muted-small">Need to bring more stock to the stall, or buy from a supplier? Do that from the Warehouse tab. 需要补货或进货,去 Warehouse 分页。</div>' +
-
-          '<details class="manual-entry" style="box-shadow:none;">' +
-            '<summary>Advanced</summary>' +
-            '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
-              '<div class="row2">' +
-                '<div class="field"><label for="invEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="invEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
-                '<div class="field"><label for="invEditPrice">Selling price (RM) 售价</label><input class="big-input" id="invEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
-              '</div>' +
-              '<div class="row2">' +
-                '<div class="field"><label for="invEditCategory">Category</label><select id="invEditCategory">' + categoryOptionsHtml(item.category) + '</select></div>' +
-                '<div class="field"><label for="invEditUnit">Unit</label><select id="invEditUnit">' + unitOptionsHtml(item.unit) + '</select></div>' +
-              '</div>' +
-              '<button class="btn-danger" type="button" id="modalInvDelete" style="width:100%;">Remove this item</button>' +
-            '</div>' +
-          '</details>' +
+          '<div class="muted-small">Need to bring more stock to the stall, buy from a supplier, or change price/cost/category? Do that from the Warehouse tab. 需要补货、进货，或换价钱/成本/分类，去 Warehouse 分页。</div>' +
         '</div>' +
       '</div>';
     if(item.qty > 0){
@@ -794,30 +779,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }
     document.getElementById('modalInvSave').addEventListener('click', function(){
       var qty = parseFloat(document.getElementById('invEditQty').value);
-      var cost = parseFloat(document.getElementById('invEditCost').value);
       var reorderRaw = document.getElementById('invEditReorder').value;
-      var priceRaw = document.getElementById('invEditPrice').value;
-      var category = document.getElementById('invEditCategory').value;
-      var unit = document.getElementById('invEditUnit').value;
-      if(isNaN(qty) || isNaN(cost)){ return; }
+      if(isNaN(qty)){ return; }
       item.qty = qty;
-      item.unitCost = cost;
       item.reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
-      item.sellPrice = priceRaw === '' ? null : parseFloat(priceRaw);
-      item.category = category;
-      item.unit = unit;
       save();
       closeModal();
       renderAll();
       flash('✓ ' + item.nameEn + ' saved');
-    });
-    document.getElementById('modalInvDelete').addEventListener('click', function(){
-      if(!confirm('Remove "' + label(item) + '" from inventory?')) return;
-      data.inventory = data.inventory.filter(function(i){ return i.id !== item.id; });
-      save();
-      closeModal();
-      renderAll();
-      flash('Removed ' + item.nameEn);
     });
     document.getElementById('modalCancel').addEventListener('click', closeModal);
     document.getElementById('modalBackdrop').addEventListener('click', function(e){
@@ -922,6 +891,24 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="modal-actions">' +
             '<button class="btn-ghost" type="button" id="modalCancel" style="flex:none; width:100%;">Close</button>' +
           '</div>' +
+
+          '<details class="manual-entry" style="box-shadow:none;">' +
+            '<summary>Advanced</summary>' +
+            '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
+              '<div class="muted-small" style="margin:0;">Changing price/cost only affects sales from today onward — past sales, profit and totals stay exactly as they were. 换价钱/成本只影响今天以后的销售，之前的记录不会变。</div>' +
+              '<div class="row2">' +
+                '<div class="field"><label for="whEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="whEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
+                '<div class="field"><label for="whEditPrice">Selling price (RM) 售价</label><input class="big-input" id="whEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
+              '</div>' +
+              '<button class="btn-ghost" type="button" id="whPriceSave" style="width:100%;">Save price/cost 保存价钱/成本</button>' +
+              '<div class="row2">' +
+                '<div class="field"><label for="whEditCategory">Category</label><select id="whEditCategory">' + categoryOptionsHtml(item.category) + '</select></div>' +
+                '<div class="field"><label for="whEditUnit">Unit</label><select id="whEditUnit">' + unitOptionsHtml(item.unit) + '</select></div>' +
+              '</div>' +
+              '<button class="btn-ghost" type="button" id="whCatSave" style="width:100%;">Save category/unit</button>' +
+              '<button class="btn-danger" type="button" id="whDelete" style="width:100%;">Remove this item</button>' +
+            '</div>' +
+          '</details>' +
         '</div>' +
       '</div>';
     root.querySelectorAll('[data-buy]').forEach(function(btn){
@@ -939,6 +926,33 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       var n = parseInt(document.getElementById('bringCustom').value, 10);
       if(!n || n < 1){ document.getElementById('bringCustom').focus(); return; }
       bringToStall(item, n);
+    });
+    document.getElementById('whPriceSave').addEventListener('click', function(){
+      var cost = parseFloat(document.getElementById('whEditCost').value);
+      var priceRaw = document.getElementById('whEditPrice').value;
+      if(isNaN(cost)) return;
+      item.unitCost = cost;
+      item.sellPrice = priceRaw === '' ? null : parseFloat(priceRaw);
+      save();
+      closeModal();
+      renderAll();
+      flash('✓ Price/cost updated from today — past sales unaffected');
+    });
+    document.getElementById('whCatSave').addEventListener('click', function(){
+      item.category = document.getElementById('whEditCategory').value;
+      item.unit = document.getElementById('whEditUnit').value;
+      save();
+      closeModal();
+      renderAll();
+      flash('✓ ' + item.nameEn + ' saved');
+    });
+    document.getElementById('whDelete').addEventListener('click', function(){
+      if(!confirm('Remove "' + label(item) + '" from inventory?')) return;
+      data.inventory = data.inventory.filter(function(i){ return i.id !== item.id; });
+      save();
+      closeModal();
+      renderAll();
+      flash('Removed ' + item.nameEn);
     });
     document.getElementById('modalCancel').addEventListener('click', closeModal);
     document.getElementById('modalBackdrop').addEventListener('click', function(e){
