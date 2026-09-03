@@ -128,6 +128,32 @@ button.primary:hover{filter:brightness(1.05);}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button.primary{color:#241708;}}
 :root[data-theme="dark"] button.primary{color:#241708;}
 
+button.btn-ghost{
+  font:inherit; font-weight:600; font-size:.85rem; padding:10px 12px; border-radius:9px;
+  border:1px solid var(--line); background:var(--paper); color:var(--ink-soft); cursor:pointer;
+  white-space:nowrap;
+}
+button.btn-ghost:hover{color:var(--ink); border-color:var(--ink-soft);}
+
+.lookup-result{
+  margin-top:2px; padding:12px 14px; border-radius:10px; background:var(--accent-soft);
+  color:var(--accent-ink); font-size:.88rem; font-weight:600;
+}
+.lookup-result .n{font-family:'IBM Plex Mono',monospace; font-size:1.3rem; display:block; margin-top:2px;}
+.lookup-result.muted{background:var(--paper); color:var(--ink-soft); font-weight:500; border:1px dashed var(--line);}
+
+.danger-zone{
+  border:1px dashed var(--bad); border-radius:12px; padding:12px 14px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+.danger-zone .txt{font-size:.78rem; color:var(--ink-soft); max-width:60%;}
+button.btn-danger{
+  font:inherit; font-weight:600; font-size:.82rem; padding:9px 12px; border-radius:9px;
+  border:1px solid var(--bad); background:var(--bad-soft); color:var(--bad); cursor:pointer;
+  white-space:nowrap;
+}
+button.btn-danger:hover{background:var(--bad); color:#fff;}
+
 /* list rows */
 .list{display:flex; flex-direction:column; gap:8px;}
 .item-row{
@@ -200,6 +226,11 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
         <div class="section-title">Recent activity</div>
         <div class="list" id="recentList" style="margin-top:8px;"></div>
       </div>
+
+      <div class="danger-zone">
+        <span class="txt">Wipe all inventory, orders and wastage data on this device.</span>
+        <button class="btn-danger" id="clearDataBtn" type="button">Clear all data</button>
+      </div>
     </section>
 
     <!-- INVENTORY -->
@@ -228,14 +259,27 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     <section class="view" id="view-orders">
       <form class="card" id="orderForm">
         <div class="section-title" style="margin-bottom:2px;">Log a sale</div>
-        <div class="field"><label for="orderItem">Menu item</label><input id="orderItem" placeholder="e.g. Smash burger" required></div>
+        <div class="field"><label for="orderItem">Menu item</label><input id="orderItem" list="menuItemsList" placeholder="e.g. Charsiu bao" autocomplete="off" required></div>
+        <datalist id="menuItemsList"></datalist>
         <div class="row3">
           <div class="field"><label for="orderQty">Qty sold</label><input id="orderQty" type="number" step="1" min="1" value="1" required></div>
           <div class="field"><label for="orderPrice">Price each (RM)</label><input id="orderPrice" type="number" step="0.01" min="0" required></div>
           <div class="field"><label for="orderCost">Cost each (RM)</label><input id="orderCost" type="number" step="0.01" min="0" placeholder="optional"></div>
         </div>
-        <button class="primary" type="submit">Log sale</button>
+        <div class="row2">
+          <button class="primary" type="submit">Log sale</button>
+          <button class="btn-ghost" type="button" id="undoOrderBtn">↩ Undo last order</button>
+        </div>
       </form>
+
+      <div class="card" id="lookupCard">
+        <div class="section-title" style="margin-bottom:2px;">Check an item</div>
+        <div class="field">
+          <label for="itemLookup">Menu item</label>
+          <select id="itemLookup"><option value="">— select an item —</option></select>
+        </div>
+        <div class="lookup-result" id="lookupResult">Pick an item to see today's total.</div>
+      </div>
 
       <div>
         <div class="section-title">Today's orders<span class="count" id="orderCount">0</span></div>
@@ -437,6 +481,71 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     save(); renderAll();
   });
 
+  document.getElementById('undoOrderBtn').addEventListener('click', function(){
+    if(!data.orders.length){ alert('No orders to undo.'); return; }
+    var last = data.orders[data.orders.length - 1];
+    if(!confirm('Undo last order — "' + last.item + '" × ' + last.qty + '?')) return;
+    data.orders.pop();
+    save(); renderAll();
+  });
+
+  // ---- known menu items (autocomplete + lookup) ----
+  function knownItems(){
+    var seen = {}, out = [];
+    data.orders.forEach(function(o){
+      var key = o.item.trim().toLowerCase();
+      if(!seen[key]){ seen[key] = o.item.trim(); out.push(seen[key]); }
+    });
+    data.inventory.forEach(function(i){
+      var key = i.name.trim().toLowerCase();
+      if(!seen[key]){ seen[key] = i.name.trim(); out.push(seen[key]); }
+    });
+    return out.sort(function(a,b){ return a.localeCompare(b); });
+  }
+
+  function renderMenuDatalist(){
+    var dl = document.getElementById('menuItemsList');
+    dl.innerHTML = knownItems().map(function(n){ return '<option value="' + esc(n) + '">'; }).join('');
+  }
+
+  function renderItemLookup(){
+    var sel = document.getElementById('itemLookup');
+    var prev = sel.value;
+    var items = knownItems();
+    sel.innerHTML = '<option value="">— select an item —</option>' +
+      items.map(function(n){ return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('');
+    if(items.indexOf(prev) !== -1) sel.value = prev;
+    updateLookupResult();
+  }
+
+  function updateLookupResult(){
+    var sel = document.getElementById('itemLookup');
+    var box = document.getElementById('lookupResult');
+    var name = sel.value;
+    if(!name){
+      box.className = 'lookup-result muted';
+      box.innerHTML = 'Pick an item to see today\'s total.';
+      return;
+    }
+    var today = todayStr();
+    var key = name.trim().toLowerCase();
+    var todays = data.orders.filter(function(o){ return o.date === today && o.item.trim().toLowerCase() === key; });
+    var qty = todays.reduce(function(s,o){ return s + o.qty; }, 0);
+    var rev = todays.reduce(function(s,o){ return s + o.qty*o.price; }, 0);
+    box.className = 'lookup-result';
+    box.innerHTML = esc(name) + ' sold today<span class="n">' + qty + ' pcs · ' + fmt(rev) + '</span>';
+  }
+
+  document.getElementById('itemLookup').addEventListener('change', updateLookupResult);
+
+  document.getElementById('clearDataBtn').addEventListener('click', function(){
+    if(!confirm('Clear ALL inventory, orders and wastage data on this device? This cannot be undone.')) return;
+    if(!confirm('Are you sure? This will permanently erase everything.')) return;
+    data = {inventory:[], orders:[], wastage:[]};
+    save();
+    renderAll();
+  });
+
   // ---- wastage logic ----
   function renderWastage(){
     var list = document.getElementById('wasteList');
@@ -535,6 +644,8 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     renderInventory();
     renderOrders();
     renderWastage();
+    renderMenuDatalist();
+    renderItemLookup();
   }
   renderAll();
 })();
