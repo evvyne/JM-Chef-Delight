@@ -1,3 +1,5 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JM Chef Delight</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
@@ -104,7 +106,7 @@ main{flex:1; padding:16px 16px 90px; display:flex; flex-direction:column; gap:18
 .empty-note{font-size:.82rem; color:var(--ink-soft); padding:2px 2px;}
 
 /* forms */
-form.card{
+.card{
   background:var(--paper-raised); border:1px solid var(--line); border-radius:14px;
   padding:16px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow);
 }
@@ -177,27 +179,130 @@ button.btn-danger:hover{background:var(--bad); color:#fff;}
 }
 .pill.stock-ok{background:var(--good-soft); color:var(--good);}
 .pill.stock-low{background:var(--bad-soft); color:var(--bad);}
+.pill.served{background:var(--good-soft); color:var(--good);}
+.pill.pending{background:var(--accent-soft); color:var(--accent-ink);}
+
+.item-row.pending{border-left:4px solid var(--accent); cursor:pointer;}
+.item-row.served{opacity:.6; cursor:pointer;}
+.item-row.served .t{text-decoration:line-through; text-decoration-color:var(--good); text-decoration-thickness:2px;}
+
+.order-chip-row{display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px;}
+.order-chip{
+  flex:0 0 auto; padding:9px 16px; border-radius:999px; border:1px solid var(--line);
+  background:var(--paper-raised); font:inherit; font-size:.82rem; font-weight:700;
+  color:var(--ink-soft); cursor:pointer; white-space:nowrap;
+}
+.order-chip.active{background:var(--accent); border-color:var(--accent); color:#fff;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .order-chip.active{color:#241708;}}
+:root[data-theme="dark"] .order-chip.active{color:#241708;}
+.order-chip.add{border-style:dashed; color:var(--accent); background:transparent;}
 
 /* tabs */
 nav.tabs{
   position:sticky; bottom:0; left:0; right:0;
   background:var(--paper-raised); border-top:1px solid var(--line);
-  display:flex; padding:6px 8px calc(6px + env(safe-area-inset-bottom));
-  gap:4px;
+  display:flex; padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+  gap:2px; overflow-x:auto; -webkit-overflow-scrolling:touch;
 }
 nav.tabs button{
-  flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+  position:relative; flex:1 0 auto; min-width:58px; display:flex; flex-direction:column; align-items:center; gap:2px;
   background:transparent; border:none; padding:8px 4px 6px; border-radius:10px;
-  color:var(--ink-soft); font:inherit; font-size:.68rem; font-weight:600; cursor:pointer;
-  letter-spacing:.01em;
+  color:var(--ink-soft); font:inherit; font-size:.64rem; font-weight:600; cursor:pointer;
+  letter-spacing:.01em; white-space:nowrap;
 }
-nav.tabs button .ic{font-size:1.15rem; line-height:1;}
+nav.tabs button .ic{font-size:1.1rem; line-height:1;}
+nav.tabs button .en{font-size:.63rem; line-height:1.3;}
+nav.tabs button .zh{font-size:.56rem; line-height:1.2; opacity:.72; font-weight:500;}
 nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
+.tab-badge{
+  position:absolute; top:2px; right:6px; background:var(--accent); color:#fff;
+  font-size:.6rem; font-weight:700; min-width:15px; height:15px; border-radius:999px;
+  display:flex; align-items:center; justify-content:center; padding:0 3px;
+}
 
 .view{display:none; flex-direction:column; gap:18px;}
 .view.active{display:flex;}
 
 .muted-small{font-size:.72rem; color:var(--ink-soft); line-height:1.4;}
+
+/* quick sell grid */
+.quick-list{display:flex; flex-direction:column; gap:10px;}
+.quick-grid{
+  display:grid; grid-template-columns:1fr 1fr; gap:10px;
+}
+.quick-tile{
+  position:relative; text-align:left; cursor:pointer;
+  background:var(--paper-raised); border:1px solid var(--line); border-radius:14px;
+  padding:14px 40px 14px 14px; min-height:64px; box-shadow:var(--shadow);
+  display:flex; flex-direction:column; justify-content:center; gap:3px;
+}
+.quick-tile:active{background:var(--accent-soft); border-color:var(--accent);}
+.quick-tile .qt-name{font-weight:700; font-size:.92rem; line-height:1.25;}
+.quick-tile .qt-name .zh{display:block; font-weight:600; font-size:.86rem; color:var(--ink-soft);}
+.cat-header{
+  font-family:'Fraunces',serif; font-weight:600; font-size:.88rem; color:var(--ink-soft);
+  margin:2px 0 -2px; padding-left:2px;
+}
+.cat-header:first-child{margin-top:0;}
+.quick-tile .qt-price{font-family:'IBM Plex Mono',monospace; font-size:.82rem; color:var(--accent); font-weight:600;}
+.quick-tile .qt-price.unset{color:var(--ink-soft); font-family:'Public Sans'; font-weight:500; font-style:italic;}
+.quick-tile .qt-stock{font-size:.68rem; color:var(--ink-soft);}
+.quick-tile .qt-stock.low{color:var(--bad); font-weight:600;}
+.qt-edit{
+  position:absolute; top:8px; right:8px; width:26px; height:26px; border-radius:8px;
+  border:none; background:transparent; color:var(--ink-soft); font-size:.85rem; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+}
+.qt-edit:hover{background:var(--line); color:var(--ink);}
+
+/* bottom-sheet modal */
+.modal-backdrop{
+  position:fixed; inset:0; background:rgba(20,16,10,.45); z-index:80;
+  display:flex; align-items:flex-end; justify-content:center;
+}
+.modal-panel{
+  width:100%; max-width:520px; background:var(--paper-raised);
+  border-radius:20px 20px 0 0; padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+  box-shadow:var(--shadow); display:flex; flex-direction:column; gap:14px;
+  max-height:85vh; overflow-y:auto;
+}
+.modal-title{font-family:'Fraunces',serif; font-weight:600; font-size:1.15rem;}
+.modal-sub{font-size:.8rem; color:var(--ink-soft); margin-top:-8px;}
+.qty-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+.qty-btn{
+  font:inherit; font-weight:700; font-size:1.4rem; padding:16px 4px; border-radius:12px;
+  border:1px solid var(--line); background:var(--paper); color:var(--ink); cursor:pointer;
+  font-family:'IBM Plex Mono',monospace;
+}
+.qty-btn:active{background:var(--accent); border-color:var(--accent); color:#fff;}
+.big-input{
+  font:inherit; font-family:'IBM Plex Mono',monospace; font-size:1.6rem; font-weight:600;
+  text-align:center; padding:14px 10px; border-radius:12px; border:1px solid var(--line);
+  background:var(--paper); color:var(--ink); width:100%;
+}
+.modal-actions{display:flex; gap:10px;}
+.modal-actions button{flex:1;}
+.remembered-price{
+  font-size:.78rem; color:var(--ink-soft); background:var(--paper); border:1px dashed var(--line);
+  border-radius:9px; padding:8px 10px;
+}
+.flash-toast{
+  position:fixed; top:14px; left:50%; transform:translateX(-50%) translateY(-140%);
+  background:var(--good); color:#fff; font-weight:600; font-size:.85rem;
+  padding:10px 18px; border-radius:999px; box-shadow:var(--shadow); z-index:90;
+  transition:transform .25s ease; white-space:nowrap;
+}
+.flash-toast.show{transform:translateX(-50%) translateY(0);}
+
+details.manual-entry{background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);}
+details.manual-entry summary{
+  padding:13px 16px; font-weight:600; font-size:.88rem; color:var(--ink-soft); cursor:pointer;
+  list-style:none; display:flex; align-items:center; justify-content:space-between;
+}
+details.manual-entry summary::-webkit-details-marker{display:none;}
+details.manual-entry summary::after{content:'+'; font-size:1.1rem; color:var(--ink-soft);}
+details.manual-entry[open] summary::after{content:'–';}
+details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; border-radius:0;}
 </style>
 
 <div class="app">
@@ -210,94 +315,138 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
       <div class="summary-grid">
-        <div class="tile"><div class="label">Revenue today</div><div class="value" id="sumRevenue">—</div></div>
-        <div class="tile"><div class="label">Cost today</div><div class="value" id="sumCost">—</div></div>
-        <div class="tile profit wide" id="profitTile"><div class="label">Profit today</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
-        <div class="tile"><div class="label">Waste (7d)</div><div class="value" id="sumWaste">—</div></div>
-        <div class="tile"><div class="label">Stock value</div><div class="value" id="sumStockValue">—</div></div>
+        <div class="tile"><div class="label">Revenue today 今日营收</div><div class="value" id="sumRevenue">—</div></div>
+        <div class="tile"><div class="label">Cost today 今日成本</div><div class="value" id="sumCost">—</div></div>
+        <div class="tile profit wide" id="profitTile"><div class="label">Profit today 今日利润</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
+        <div class="tile"><div class="label">Waste (7d) 损耗(7天)</div><div class="value" id="sumWaste">—</div></div>
+        <div class="tile"><div class="label">Stock value 库存价值</div><div class="value" id="sumStockValue">—</div></div>
       </div>
 
       <div>
-        <div class="section-title">Low stock<span class="count" id="lowStockCount">0</span></div>
+        <div class="section-title">Low stock 库存不足<span class="count" id="lowStockCount">0</span></div>
         <div class="alert-list" id="lowStockList" style="margin-top:8px;"></div>
       </div>
 
       <div>
-        <div class="section-title">Recent activity</div>
+        <div class="section-title">Recent activity 最近动态</div>
         <div class="list" id="recentList" style="margin-top:8px;"></div>
       </div>
 
       <div class="danger-zone">
-        <span class="txt">Wipe all inventory, orders and wastage data on this device.</span>
-        <button class="btn-danger" id="clearDataBtn" type="button">Clear all data</button>
+        <span class="txt">Wipe all inventory, orders and wastage data on this device. 清除这台设备上所有的数据。</span>
+        <button class="btn-danger" id="clearDataBtn" type="button">Clear all data 清除所有数据</button>
       </div>
     </section>
 
     <!-- INVENTORY -->
     <section class="view" id="view-inventory">
-      <form class="card" id="invForm">
-        <div class="section-title" style="margin-bottom:2px;">Add / restock item</div>
-        <div class="row2">
-          <div class="field"><label for="invName">Item</label><input id="invName" placeholder="e.g. Chicken thigh" required></div>
-          <div class="field"><label for="invUnit">Unit</label><input id="invUnit" placeholder="kg, pcs, L" required></div>
-        </div>
-        <div class="row3">
-          <div class="field"><label for="invQty">Qty added</label><input id="invQty" type="number" step="0.01" min="0" required></div>
-          <div class="field"><label for="invCost">Unit cost (RM)</label><input id="invCost" type="number" step="0.01" min="0" required></div>
-          <div class="field"><label for="invReorder">Reorder at</label><input id="invReorder" type="number" step="0.01" min="0" placeholder="optional"></div>
-        </div>
-        <button class="primary" type="submit">Add stock</button>
-      </form>
-
       <div>
-        <div class="section-title">Current inventory<span class="count" id="invCount">0</span></div>
-        <div class="list" id="invList" style="margin-top:8px;"></div>
+        <div class="section-title" style="margin-bottom:8px;">Tap to edit 点击编辑<span class="count" id="invCount">0</span></div>
+        <div class="quick-list" id="invGrid"></div>
+      </div>
+
+      <details class="manual-entry">
+        <summary>Add a new item 添加新品项</summary>
+        <form id="invForm">
+          <div class="row2">
+            <div class="field"><label for="invNameEn">Name (English)</label><input id="invNameEn" placeholder="e.g. Charsiu Pau" required></div>
+            <div class="field"><label for="invNameZh">Name (华文)</label><input id="invNameZh" placeholder="例：叉烧包"></div>
+          </div>
+          <div class="row2">
+            <div class="field"><label for="invCategory">Category 分类</label>
+              <select id="invCategory">
+                <option value="Pau">Pau 包</option>
+                <option value="Dimsum">Dimsum 点心</option>
+                <option value="TongSui">Tong Sui 糖水</option>
+                <option value="Other">Other 其他</option>
+              </select>
+            </div>
+            <div class="field"><label for="invUnit">Unit 单位</label>
+              <select id="invUnit">
+                <option value="pcs">pcs</option>
+                <option value="bowl">bowl</option>
+                <option value="plate">plate</option>
+              </select>
+            </div>
+          </div>
+          <div class="row3">
+            <div class="field"><label for="invQty">Starting qty 起始数量</label><input id="invQty" type="number" step="0.01" min="0" value="0"></div>
+            <div class="field"><label for="invCost">Unit cost (RM) 单位成本</label><input id="invCost" type="number" step="0.01" min="0" placeholder="optional"></div>
+            <div class="field"><label for="invReorder">Reorder at 补货提醒</label><select id="invReorder"></select></div>
+          </div>
+          <div class="field"><label for="invSellPrice">Selling price (RM) 售价</label><input id="invSellPrice" type="number" step="0.01" min="0" placeholder="used on the Orders tap buttons"></div>
+          <button class="primary" type="submit" style="margin-top:10px;">Add item 添加品项</button>
+        </form>
+      </details>
+    </section>
+
+    <!-- WAREHOUSE -->
+    <section class="view" id="view-warehouse">
+      <div class="muted-small">Stock you've bought but haven't brought out to the stall yet. Buy here when you get stock from a supplier, then bring some out when you head to the truck.</div>
+      <div>
+        <div class="section-title" style="margin-bottom:8px;">Tap an item 点击品项<span class="count" id="whCount">0</span></div>
+        <div class="quick-list" id="warehouseGrid"></div>
       </div>
     </section>
 
     <!-- ORDERS -->
     <section class="view" id="view-orders">
-      <form class="card" id="orderForm">
-        <div class="section-title" style="margin-bottom:2px;">Log a sale</div>
-        <div class="field"><label for="orderItem">Menu item</label><input id="orderItem" list="menuItemsList" placeholder="e.g. Charsiu bao" autocomplete="off" required></div>
-        <datalist id="menuItemsList"></datalist>
-        <div class="row3">
-          <div class="field"><label for="orderQty">Qty sold</label><input id="orderQty" type="number" step="1" min="1" value="1" required></div>
-          <div class="field"><label for="orderPrice">Price each (RM)</label><input id="orderPrice" type="number" step="0.01" min="0" required></div>
-          <div class="field"><label for="orderCost">Cost each (RM)</label><input id="orderCost" type="number" step="0.01" min="0" placeholder="optional"></div>
-        </div>
-        <div class="row2">
-          <button class="primary" type="submit">Log sale</button>
-          <button class="btn-ghost" type="button" id="undoOrderBtn">↩ Undo last order</button>
-        </div>
-      </form>
+      <div>
+        <div class="section-title" style="margin-bottom:8px;">Adding to 加入到<button class="btn-ghost" type="button" id="undoOrderBtn" style="padding:6px 10px; font-size:.72rem;">↩ Undo last</button></div>
+        <div class="order-chip-row" id="orderChipRow"></div>
+      </div>
+
+      <div>
+        <div class="section-title" style="margin-bottom:8px;">Tap to sell 点击售出</div>
+        <div class="quick-list" id="quickGrid"></div>
+      </div>
 
       <div class="card" id="lookupCard">
-        <div class="section-title" style="margin-bottom:2px;">Check an item</div>
+        <div class="section-title" style="margin-bottom:2px;">Check an item 查询品项</div>
         <div class="field">
-          <label for="itemLookup">Menu item</label>
+          <label for="itemLookup">Menu item 品项</label>
           <select id="itemLookup"><option value="">— select an item —</option></select>
         </div>
         <div class="lookup-result" id="lookupResult">Pick an item to see today's total.</div>
       </div>
 
       <div>
-        <div class="section-title">Today's orders<span class="count" id="orderCount">0</span></div>
+        <div class="section-title">Today's orders 今日订单<span class="count" id="orderCount">0</span></div>
         <div class="list" id="orderList" style="margin-top:8px;"></div>
       </div>
+
+      <details class="manual-entry">
+        <summary>Type a sale manually 手动输入销售</summary>
+        <form id="orderForm">
+          <div class="field"><label for="orderItem">Menu item 品项</label><input id="orderItem" list="menuItemsList" placeholder="e.g. Charsiu bao" autocomplete="off" required></div>
+          <datalist id="menuItemsList"></datalist>
+          <div class="row3">
+            <div class="field"><label for="orderQty">Qty sold 数量</label><input id="orderQty" type="number" step="1" min="1" value="1" required></div>
+            <div class="field"><label for="orderPrice">Price each (RM) 单价</label><input id="orderPrice" type="number" step="0.01" min="0" required></div>
+            <div class="field"><label for="orderCost">Cost each (RM) 成本</label><input id="orderCost" type="number" step="0.01" min="0" placeholder="optional"></div>
+          </div>
+          <button class="primary" type="submit" style="margin-top:10px;">Log sale 记录销售</button>
+        </form>
+      </details>
+    </section>
+
+    <!-- SERVE (open orders, grouped) -->
+    <section class="view" id="view-serve">
+      <div id="serveList"></div>
+      <div class="empty-note" id="ticketEmptyNote">Nothing here yet — go to Orders, tap "+ Add order", then tap items to build it. 去 Orders 加订单,再点品项加进去。</div>
     </section>
 
     <!-- WASTAGE -->
     <section class="view" id="view-wastage">
       <form class="card" id="wasteForm">
-        <div class="section-title" style="margin-bottom:2px;">Log wastage</div>
+        <div class="section-title" style="margin-bottom:2px;">Log wastage 记录损耗</div>
         <div class="row2">
-          <div class="field"><label for="wasteItem">Item</label><input id="wasteItem" placeholder="e.g. Chicken thigh" required></div>
-          <div class="field"><label for="wasteQty">Qty lost</label><input id="wasteQty" type="number" step="0.01" min="0" required></div>
+          <div class="field"><label for="wasteItem">Item 品项</label><input id="wasteItem" list="menuItemsList" placeholder="e.g. Charsiu Pau 叉烧包" autocomplete="off" required></div>
+          <div class="field"><label for="wasteQty">Qty lost 损耗数量</label><input id="wasteQty" type="number" step="0.01" min="0" required></div>
         </div>
         <div class="row2">
-          <div class="field"><label for="wasteCost">Unit cost (RM)</label><input id="wasteCost" type="number" step="0.01" min="0" placeholder="optional"></div>
-          <div class="field"><label for="wasteReason">Reason</label>
+          <div class="field"><label for="wasteCost">Unit cost (RM) 单位成本</label><input id="wasteCost" type="number" step="0.01" min="0" placeholder="optional"></div>
+          <div class="field"><label for="wasteReason">Reason 原因</label>
             <select id="wasteReason">
               <option>Expired</option>
               <option>Spoiled</option>
@@ -307,23 +456,37 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
             </select>
           </div>
         </div>
-        <button class="primary" type="submit">Log wastage</button>
+        <button class="primary" type="submit">Log wastage 记录损耗</button>
       </form>
 
       <div>
-        <div class="section-title">Recent wastage<span class="count" id="wasteCount">0</span></div>
+        <div class="section-title">Recent wastage 最近损耗<span class="count" id="wasteCount">0</span></div>
         <div class="list" id="wasteList" style="margin-top:8px;"></div>
+      </div>
+    </section>
+
+    <!-- RESTOCK HISTORY -->
+    <section class="view" id="view-restock">
+      <div>
+        <div class="section-title">Restock history 进货记录<span class="count" id="restockCount">0</span></div>
+        <div class="list" id="restockList" style="margin-top:8px;"></div>
       </div>
     </section>
   </main>
 
   <nav class="tabs">
-    <button class="tab-btn active" data-view="dashboard"><span class="ic">◈</span>Dashboard</button>
-    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span>Inventory</button>
-    <button class="tab-btn" data-view="orders"><span class="ic">✎</span>Orders</button>
-    <button class="tab-btn" data-view="wastage"><span class="ic">⚠</span>Wastage</button>
+    <button class="tab-btn active" data-view="dashboard"><span class="ic">◈</span><span class="en">Dashboard</span><span class="zh">总览</span></button>
+    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span><span class="en">Stall</span><span class="zh">摊位</span></button>
+    <button class="tab-btn" data-view="warehouse"><span class="ic">🏬</span><span class="en">Warehouse</span><span class="zh">仓库</span></button>
+    <button class="tab-btn" data-view="orders"><span class="ic">✎</span><span class="en">Orders</span><span class="zh">点单</span></button>
+    <button class="tab-btn" data-view="serve"><span class="ic">☑</span><span class="en">Serve</span><span class="zh">上菜</span><span class="tab-badge" id="ticketBadge" hidden>0</span></button>
+    <button class="tab-btn" data-view="wastage"><span class="ic">⚠</span><span class="en">Wastage</span><span class="zh">损耗</span></button>
+    <button class="tab-btn" data-view="restock"><span class="ic">↻</span><span class="en">History</span><span class="zh">记录</span></button>
   </nav>
 </div>
+
+<div id="quickModalRoot"></div>
+<div class="flash-toast" id="flashToast"></div>
 
 <script>
 (function(){
@@ -334,24 +497,52 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
   var fmtDate = function(d){
     return new Date(d).toLocaleDateString('en-MY', {weekday:'short', day:'numeric', month:'short'});
   };
+  var fmtTime = function(iso){
+    if(!iso) return '';
+    return new Date(iso).toLocaleTimeString('en-MY', {hour:'numeric', minute:'2-digit'});
+  };
+
+  // ---- categories ----
+  var CATEGORIES = ["Pau","Dimsum","TongSui","Other"];
+  var CAT_LABEL = {Pau:"Pau 包", Dimsum:"Dimsum 点心", TongSui:"Tong Sui 糖水", Other:"Other 其他"};
+
+  function label(i){
+    return i.nameZh ? (i.nameEn + ' ' + i.nameZh) : i.nameEn;
+  }
 
   // ---- storage ----
   var STORE_KEY = "truckledger_v1";
+  var mkInv = function(id, nameEn, nameZh, category, unit, qty, unitCost, sellPrice, reorder, warehouseQty){
+    return {id:id, nameEn:nameEn, nameZh:nameZh, category:category, unit:unit, qty:qty, unitCost:unitCost, sellPrice:sellPrice, reorder: (reorder==null?null:reorder), warehouseQty: (warehouseQty||0)};
+  };
   var seedData = function(){
     var today = todayStr();
+    var now = new Date().toISOString();
     return {
       inventory: [
-        {id:"i1", name:"Chicken thigh", unit:"kg", qty:8.5, unitCost:14.5, reorder:4},
-        {id:"i2", name:"Burger buns", unit:"pcs", qty:22, unitCost:0.9, reorder:20},
-        {id:"i3", name:"Fries (frozen)", unit:"kg", qty:11, unitCost:6.2, reorder:5}
+        mkInv("i1","Gai Wo Pau","鸡窝包","Pau","pcs",0,0,null,null),
+        mkInv("i2","Charsiu Pau","叉烧包","Pau","pcs",20,1.8,3,10),
+        mkInv("i3","Dai Pau","大包","Pau","pcs",0,0,null,null),
+        mkInv("i4","Sang Yok Pau","生肉包","Pau","pcs",0,0,null,null),
+        mkInv("i5","Dao Sa Pau","豆沙包","Pau","pcs",0,0,null,null),
+        mkInv("i6","Lin Yong Pau","莲蓉包","Pau","pcs",0,0,null,null),
+        mkInv("i7","Kaya Pau","加央包","Pau","pcs",0,0,null,null),
+        mkInv("i8","Siumai","烧卖","Dimsum","pcs",0,0,null,null),
+        mkInv("i9","Teochew Mai","潮州卖","Dimsum","pcs",0,0,null,null),
+        mkInv("i10","Fuchok Mai","腐竹卖","Dimsum","pcs",0,0,null,null),
+        mkInv("i11","Fishball","鱼蛋","Dimsum","pcs",0,0,null,null),
+        mkInv("i12","Red Bean Black Glutinous","红豆糯米","TongSui","bowl",0,0,null,null),
+        mkInv("i13","Sweet Potato","番薯","TongSui","bowl",0,0,null,null)
       ],
       orders: [
-        {id:"o1", date:today, item:"Smash burger", qty:14, price:16, cost:6.5},
-        {id:"o2", date:today, item:"Loaded fries", qty:9, price:12, cost:4}
+        {id:"o1", date:today, time:now, item:"Charsiu Pau 叉烧包", qty:4, price:3, cost:1.8},
+        {id:"o2", date:today, time:now, item:"Charsiu Pau 叉烧包", qty:2, price:3, cost:1.8}
       ],
-      wastage: [
-        {id:"w1", date:today, item:"Burger buns", qty:3, unitCost:0.9, reason:"Dropped/damaged"}
-      ]
+      wastage: [],
+      restocks: [],
+      openOrders: [],
+      orderCounter: 0,
+      activeOrderId: null
     };
   };
 
@@ -361,13 +552,73 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     data = raw ? JSON.parse(raw) : seedData();
   }catch(e){ data = seedData(); }
   var isExample = !localStorage.getItem(STORE_KEY);
+  var uid = function(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2,6); };
+  data.restocks = data.restocks || [];
+  if(!data.openOrders){
+    data.openOrders = [];
+    if(data.currentTicket && data.currentTicket.length){
+      data.openOrders.push({id: uid('ord'), name: 'Order 1', lines: data.currentTicket});
+    }
+  }
+  delete data.currentTicket;
+  data.orderCounter = data.orderCounter || data.openOrders.length;
+  if(data.activeOrderId === undefined) data.activeOrderId = data.openOrders.length ? data.openOrders[0].id : null;
+
+  var UNIT_OPTIONS = ["pcs","bowl","plate"];
+  function unitOptionsHtml(selected){
+    var opts = UNIT_OPTIONS.slice();
+    if(selected && opts.indexOf(selected) === -1) opts.unshift(selected);
+    return opts.map(function(u){ return '<option value="' + esc(u) + '"' + (u===selected?' selected':'') + '>' + esc(u) + '</option>'; }).join('');
+  }
+  function categoryOptionsHtml(selected){
+    return CATEGORIES.map(function(c){ return '<option value="' + c + '"' + (c===selected?' selected':'') + '>' + CAT_LABEL[c] + '</option>'; }).join('');
+  }
+  function reorderOptionsHtml(selected){
+    var out = '<option value="">No reminder</option>';
+    for(var n=1;n<=30;n++){
+      out += '<option value="' + n + '"' + (String(selected)===String(n)?' selected':'') + '>' + n + '</option>';
+    }
+    return out;
+  }
+
+  // migrate any older-schema inventory rows (single `name` field) to nameEn/nameZh/category
+  data.inventory.forEach(function(i){
+    if(i.nameEn === undefined){
+      i.nameEn = i.name || 'Unnamed';
+      i.nameZh = i.nameZh || '';
+      i.category = i.category || 'Other';
+      delete i.name;
+    }
+    if(i.warehouseQty === undefined) i.warehouseQty = 0;
+  });
+  data.restocks.forEach(function(r){ if(!r.type) r.type = 'buy'; });
+
+  // make sure the standard 13-item menu is always present, without touching anything already edited
+  var needsSaveAfterBackfill = (function backfillDefaultMenu(){
+    var defaults = [
+      ["Gai Wo Pau","鸡窝包","Pau"], ["Charsiu Pau","叉烧包","Pau"], ["Dai Pau","大包","Pau"],
+      ["Sang Yok Pau","生肉包","Pau"], ["Dao Sa Pau","豆沙包","Pau"], ["Lin Yong Pau","莲蓉包","Pau"],
+      ["Kaya Pau","加央包","Pau"],
+      ["Siumai","烧卖","Dimsum"], ["Teochew Mai","潮州卖","Dimsum"], ["Fuchok Mai","腐竹卖","Dimsum"],
+      ["Fishball","鱼蛋","Dimsum"],
+      ["Red Bean Black Glutinous","红豆糯米","TongSui"], ["Sweet Potato","番薯","TongSui"]
+    ];
+    var changed = false;
+    defaults.forEach(function(d){
+      var exists = data.inventory.some(function(i){ return i.nameEn.toLowerCase() === d[0].toLowerCase(); });
+      if(!exists){
+        var unit = d[2] === 'TongSui' ? 'bowl' : 'pcs';
+        data.inventory.push(mkInv(uid('i'), d[0], d[1], d[2], unit, 0, 0, null, null));
+        changed = true;
+      }
+    });
+    return changed;
+  })();
 
   var save = function(){
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
   };
-  if(isExample) save();
-
-  var uid = function(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2,6); };
+  if(isExample || needsSaveAfterBackfill) save();
 
   // ---- tabs ----
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -381,61 +632,286 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
   });
 
   document.getElementById('todayLabel').textContent = fmtDate(todayStr());
+  document.getElementById('invReorder').innerHTML = reorderOptionsHtml('');
 
   // ---- inventory logic ----
-  function findInv(name){
-    var n = name.trim().toLowerCase();
-    return data.inventory.find(function(i){ return i.name.toLowerCase() === n; });
+  function findInv(text){
+    var n = text.trim().toLowerCase();
+    return data.inventory.find(function(i){
+      return i.nameEn.toLowerCase() === n ||
+        (i.nameZh && i.nameZh.toLowerCase() === n) ||
+        label(i).toLowerCase() === n;
+    });
   }
 
-  function renderInventory(){
-    var list = document.getElementById('invList');
+  function renderInventoryGrid(){
+    var grid = document.getElementById('invGrid');
     document.getElementById('invCount').textContent = data.inventory.length;
     if(!data.inventory.length){
-      list.innerHTML = '<div class="empty-note">No inventory yet. Add your first item above.</div>';
+      grid.innerHTML = '<div class="empty-note">No inventory yet. Add your first item below.</div>';
       return;
     }
-    var sorted = data.inventory.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
-    list.innerHTML = sorted.map(function(i){
-      var low = i.reorder != null && i.qty <= i.reorder;
-      return '<div class="item-row">' +
-        '<div class="main"><div class="t">' + esc(i.name) + '</div>' +
-        '<div class="s">' + i.qty.toFixed(2) + ' ' + esc(i.unit) + ' on hand · ' + fmt(i.unitCost) + '/' + esc(i.unit) + '</div></div>' +
-        '<div class="right">' +
-          '<span class="pill ' + (low ? 'stock-low' : 'stock-ok') + '">' + (low ? 'Low' : 'OK') + '</span>' +
-          '<button class="del-btn" data-del-inv="' + i.id + '" title="Remove item">✕</button>' +
-        '</div></div>';
-    }).join('');
+    var html = '';
+    CATEGORIES.forEach(function(cat){
+      var items = data.inventory.filter(function(i){ return i.category === cat; })
+        .sort(function(a,b){ return a.nameEn.localeCompare(b.nameEn); });
+      if(!items.length) return;
+      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="quick-grid">' + items.map(function(i){
+        var low = i.reorder != null && i.qty <= i.reorder;
+        var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
+        return '<div class="quick-tile" data-inv-item="' + i.id + '">' +
+          '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
+          '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + ' · cost ' + fmt(i.unitCost) + '</div>' +
+          '<div class="qt-stock' + (low ? ' low' : '') + '">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' at stall' + (low ? ' · low!' : '') + '</div>' +
+          '<div class="qt-stock">🏬 ' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
+          '</div>';
+      }).join('') + '</div>';
+    });
+    grid.innerHTML = html;
+  }
+
+  document.getElementById('invGrid').addEventListener('click', function(e){
+    var tile = e.target.closest('[data-inv-item]');
+    if(!tile) return;
+    openInvEditModal(tile.dataset.invItem);
+  });
+
+  function openInvEditModal(itemId){
+    var item = data.inventory.find(function(i){ return i.id === itemId; });
+    if(!item) return;
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
+
+          '<div class="row2">' +
+            '<div class="field"><label for="invEditCost">Unit cost (RM)</label><input class="big-input" id="invEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
+            '<div class="field"><label for="invEditPrice">Selling price (RM)</label><input class="big-input" id="invEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
+          '</div>' +
+          '<div class="field"><label for="invEditReorder">Reorder at</label><select id="invEditReorder">' + reorderOptionsHtml(item.reorder) + '</select></div>' +
+          '<div class="field"><label for="invEditQty">Qty at stall (' + esc(item.unit) + ', for a manual correction)</label><input class="big-input" id="invEditQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.qty + '"></div>' +
+
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel">Cancel</button>' +
+            '<button class="primary" type="button" id="modalInvSave">Save</button>' +
+          '</div>' +
+
+          '<div class="section-title" style="font-size:.85rem; margin:2px 0 0;">Packing up? Return unsold 收摊?退回仓库</div>' +
+          (item.qty > 0
+            ? ('<button class="btn-ghost" type="button" id="returnAllBtn" style="width:100%;">Return all ' + item.qty + ' ' + esc(item.unit) + ' unsold to warehouse</button>' +
+               '<div class="row2">' +
+                 '<input class="big-input" id="returnCustom" type="number" inputmode="numeric" min="1" step="1" placeholder="Or a smaller qty">' +
+                 '<button class="btn-ghost" type="button" id="returnCustomGo">Return</button>' +
+               '</div>')
+            : '<div class="empty-note">Nothing left at the stall to return.</div>') +
+
+          '<div class="muted-small">Need to bring more stock to the stall, or buy from a supplier? Do that from the Warehouse tab. 需要补货或进货,去 Warehouse 分页。</div>' +
+
+          '<details class="manual-entry" style="box-shadow:none;">' +
+            '<summary>Advanced</summary>' +
+            '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
+              '<div class="row2">' +
+                '<div class="field"><label for="invEditCategory">Category</label><select id="invEditCategory">' + categoryOptionsHtml(item.category) + '</select></div>' +
+                '<div class="field"><label for="invEditUnit">Unit</label><select id="invEditUnit">' + unitOptionsHtml(item.unit) + '</select></div>' +
+              '</div>' +
+              '<button class="btn-danger" type="button" id="modalInvDelete" style="width:100%;">Remove this item</button>' +
+            '</div>' +
+          '</details>' +
+        '</div>' +
+      '</div>';
+    if(item.qty > 0){
+      document.getElementById('returnAllBtn').addEventListener('click', function(){
+        returnToWarehouse(item, item.qty);
+      });
+      document.getElementById('returnCustomGo').addEventListener('click', function(){
+        var n = parseInt(document.getElementById('returnCustom').value, 10);
+        if(!n || n < 1){ document.getElementById('returnCustom').focus(); return; }
+        returnToWarehouse(item, n);
+      });
+    }
+    document.getElementById('modalInvSave').addEventListener('click', function(){
+      var qty = parseFloat(document.getElementById('invEditQty').value);
+      var cost = parseFloat(document.getElementById('invEditCost').value);
+      var reorderRaw = document.getElementById('invEditReorder').value;
+      var priceRaw = document.getElementById('invEditPrice').value;
+      var category = document.getElementById('invEditCategory').value;
+      var unit = document.getElementById('invEditUnit').value;
+      if(isNaN(qty) || isNaN(cost)){ return; }
+      item.qty = qty;
+      item.unitCost = cost;
+      item.reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
+      item.sellPrice = priceRaw === '' ? null : parseFloat(priceRaw);
+      item.category = category;
+      item.unit = unit;
+      save();
+      closeModal();
+      renderAll();
+      flash('✓ ' + item.nameEn + ' saved');
+    });
+    document.getElementById('modalInvDelete').addEventListener('click', function(){
+      if(!confirm('Remove "' + label(item) + '" from inventory?')) return;
+      data.inventory = data.inventory.filter(function(i){ return i.id !== item.id; });
+      save();
+      closeModal();
+      renderAll();
+      flash('Removed ' + item.nameEn);
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
+  }
+
+  // ---- warehouse (buy from supplier, then bring stock out to the stall) ----
+  function buySupplierStock(item, qty){
+    item.warehouseQty += qty;
+    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:qty, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'buy'});
+    save();
+    closeModal();
+    renderAll();
+    flash('✓ Bought ' + item.nameEn + ' +' + qty);
+  }
+
+  function bringToStall(item, qty){
+    var moved = Math.min(qty, item.warehouseQty);
+    if(moved <= 0){ flash('Warehouse is empty for ' + item.nameEn); return; }
+    item.warehouseQty -= moved;
+    item.qty += moved;
+    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:moved, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'bring'});
+    save();
+    closeModal();
+    renderAll();
+    flash(moved < qty
+      ? ('Only ' + moved + ' were in the warehouse — brought all of it to the stall')
+      : ('✓ Brought ' + item.nameEn + ' +' + moved + ' to the stall'));
+  }
+
+  function returnToWarehouse(item, qty){
+    var moved = Math.min(qty, item.qty);
+    if(moved <= 0){ flash('Nothing to return for ' + item.nameEn); return; }
+    item.qty -= moved;
+    item.warehouseQty += moved;
+    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:moved, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
+    save();
+    closeModal();
+    renderAll();
+    flash('✓ Returned ' + item.nameEn + ' ' + moved + ' to warehouse');
+  }
+
+  function renderWarehouseGrid(){
+    var grid = document.getElementById('warehouseGrid');
+    document.getElementById('whCount').textContent = data.inventory.length;
+    if(!data.inventory.length){
+      grid.innerHTML = '<div class="empty-note">No items yet. Add items from the Stall tab first.</div>';
+      return;
+    }
+    var html = '';
+    CATEGORIES.forEach(function(cat){
+      var items = data.inventory.filter(function(i){ return i.category === cat; })
+        .sort(function(a,b){ return a.nameEn.localeCompare(b.nameEn); });
+      if(!items.length) return;
+      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="quick-grid">' + items.map(function(i){
+        return '<div class="quick-tile" data-wh-item="' + i.id + '">' +
+          '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
+          '<div class="qt-price">' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
+          '<div class="qt-stock">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' already at stall</div>' +
+          '</div>';
+      }).join('') + '</div>';
+    });
+    grid.innerHTML = html;
+  }
+
+  document.getElementById('warehouseGrid').addEventListener('click', function(e){
+    var tile = e.target.closest('[data-wh-item]');
+    if(!tile) return;
+    openWarehouseModal(tile.dataset.whItem);
+  });
+
+  function openWarehouseModal(itemId){
+    var item = data.inventory.find(function(i){ return i.id === itemId; });
+    if(!item) return;
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-sub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall</div>' +
+
+          '<div class="section-title" style="font-size:.85rem; margin:0;">Bought from supplier</div>' +
+          '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
+            [5,10,20,30,50].map(function(n){ return '<button class="qty-btn" style="font-size:1rem; padding:12px 2px;" data-buy="' + n + '">+' + n + '</button>'; }).join('') +
+          '</div>' +
+          '<div class="row2">' +
+            '<input class="big-input" id="buyCustom" type="number" inputmode="numeric" min="1" step="1" placeholder="Other qty">' +
+            '<button class="btn-ghost" type="button" id="buyCustomGo">Add to warehouse</button>' +
+          '</div>' +
+
+          '<div class="section-title" style="font-size:.85rem; margin:6px 0 0;">Bring to stall</div>' +
+          '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
+            [5,10,20,30,50].map(function(n){ return '<button class="qty-btn" style="font-size:1rem; padding:12px 2px;" data-bring="' + n + '">' + n + '</button>'; }).join('') +
+          '</div>' +
+          '<div class="row2">' +
+            '<input class="big-input" id="bringCustom" type="number" inputmode="numeric" min="1" step="1" placeholder="Other qty">' +
+            '<button class="btn-ghost" type="button" id="bringCustomGo">Bring out</button>' +
+          '</div>' +
+
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel" style="flex:none; width:100%;">Close</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    root.querySelectorAll('[data-buy]').forEach(function(btn){
+      btn.addEventListener('click', function(){ buySupplierStock(item, parseInt(btn.dataset.buy, 10)); });
+    });
+    document.getElementById('buyCustomGo').addEventListener('click', function(){
+      var n = parseInt(document.getElementById('buyCustom').value, 10);
+      if(!n || n < 1){ document.getElementById('buyCustom').focus(); return; }
+      buySupplierStock(item, n);
+    });
+    root.querySelectorAll('[data-bring]').forEach(function(btn){
+      btn.addEventListener('click', function(){ bringToStall(item, parseInt(btn.dataset.bring, 10)); });
+    });
+    document.getElementById('bringCustomGo').addEventListener('click', function(){
+      var n = parseInt(document.getElementById('bringCustom').value, 10);
+      if(!n || n < 1){ document.getElementById('bringCustom').focus(); return; }
+      bringToStall(item, n);
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
   }
 
   document.getElementById('invForm').addEventListener('submit', function(e){
     e.preventDefault();
-    var name = document.getElementById('invName').value.trim();
+    var nameEn = document.getElementById('invNameEn').value.trim();
+    var nameZh = document.getElementById('invNameZh').value.trim();
+    var category = document.getElementById('invCategory').value;
     var unit = document.getElementById('invUnit').value.trim();
-    var qty = parseFloat(document.getElementById('invQty').value);
-    var cost = parseFloat(document.getElementById('invCost').value);
+    var qtyRaw = document.getElementById('invQty').value;
+    var qty = qtyRaw === '' ? 0 : parseFloat(qtyRaw);
+    var costRaw = document.getElementById('invCost').value;
+    var cost = costRaw === '' ? 0 : parseFloat(costRaw);
     var reorderRaw = document.getElementById('invReorder').value;
     var reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
-    if(!name || isNaN(qty) || isNaN(cost)) return;
+    var priceRaw = document.getElementById('invSellPrice').value;
+    if(!nameEn || isNaN(qty) || isNaN(cost)) return;
 
-    var existing = findInv(name);
+    var existing = findInv(nameEn);
     if(existing){
-      existing.qty += qty;
-      existing.unitCost = cost;
-      if(reorder != null) existing.reorder = reorder;
-    } else {
-      data.inventory.push({id:uid('i'), name:name, unit:unit || 'unit', qty:qty, unitCost:cost, reorder:reorder});
+      flash('That item already exists — tap its tile above to edit it');
+      return;
     }
+    data.inventory.push(mkInv(uid('i'), nameEn, nameZh, category, unit || 'pcs', qty, cost,
+      priceRaw === '' ? null : parseFloat(priceRaw), reorder));
     save();
     this.reset();
+    document.getElementById('invCategory').value = category;
     renderAll();
-  });
-
-  document.getElementById('invList').addEventListener('click', function(e){
-    var btn = e.target.closest('[data-del-inv]');
-    if(!btn) return;
-    data.inventory = data.inventory.filter(function(i){ return i.id !== btn.dataset.delInv; });
-    save(); renderAll();
   });
 
   // ---- orders logic ----
@@ -451,9 +927,10 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     }
     list.innerHTML = todays.map(function(o){
       var rev = o.qty * o.price;
+      var t = fmtTime(o.time);
       return '<div class="item-row">' +
         '<div class="main"><div class="t">' + esc(o.item) + '</div>' +
-        '<div class="s">' + o.qty + ' × ' + fmt(o.price) + '</div></div>' +
+        '<div class="s">' + o.qty + ' × ' + fmt(o.price) + (t ? ' · ' + t : '') + '</div></div>' +
         '<div class="right"><span class="amt good">' + fmt(rev) + '</span>' +
         '<button class="del-btn" data-del-order="' + o.id + '" title="Remove">✕</button></div></div>';
     }).join('');
@@ -467,7 +944,9 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     var costRaw = document.getElementById('orderCost').value;
     var cost = costRaw === '' ? 0 : parseFloat(costRaw);
     if(!item || isNaN(qty) || isNaN(price)) return;
-    data.orders.push({id:uid('o'), date:todayStr(), item:item, qty:qty, price:price, cost:cost});
+    data.orders.push({id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:item, qty:qty, price:price, cost:cost});
+    var inv = findInv(item);
+    if(inv) inv.qty = Math.max(0, inv.qty - qty);
     save();
     this.reset();
     document.getElementById('orderQty').value = 1;
@@ -486,7 +965,298 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     var last = data.orders[data.orders.length - 1];
     if(!confirm('Undo last order — "' + last.item + '" × ' + last.qty + '?')) return;
     data.orders.pop();
+    var inv = findInv(last.item);
+    if(inv) inv.qty += last.qty;
     save(); renderAll();
+  });
+
+  // ---- quick sell (tap buttons for parents) ----
+  var flashTimer = null;
+  function flash(msg){
+    var el = document.getElementById('flashToast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(function(){ el.classList.remove('show'); }, 1600);
+  }
+
+  function renderQuickGrid(){
+    var grid = document.getElementById('quickGrid');
+    if(!data.inventory.length){
+      grid.innerHTML = '<div class="empty-note">Add items in the Inventory tab first — they\'ll show up here as buttons.</div>';
+      return;
+    }
+    var html = '';
+    CATEGORIES.forEach(function(cat){
+      var items = data.inventory.filter(function(i){ return i.category === cat; })
+        .sort(function(a,b){ return a.nameEn.localeCompare(b.nameEn); });
+      if(!items.length) return;
+      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="quick-grid">' + items.map(function(i){
+        var priceLabel = (i.sellPrice != null) ? fmt(i.sellPrice) + ' each' : 'Set price in Inventory';
+        return '<div class="quick-tile" data-quick-item="' + i.id + '">' +
+          '<button class="qt-edit" data-edit-price="' + i.id + '" title="Edit selling price">✎</button>' +
+          '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
+          '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
+          '<div class="qt-stock">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left</div>' +
+          '</div>';
+      }).join('') + '</div>';
+    });
+    grid.innerHTML = html;
+  }
+
+  document.getElementById('quickGrid').addEventListener('click', function(e){
+    var editBtn = e.target.closest('[data-edit-price]');
+    if(editBtn){
+      openPriceModal(editBtn.dataset.editPrice, true);
+      return;
+    }
+    var tile = e.target.closest('[data-quick-item]');
+    if(!tile) return;
+    var item = data.inventory.find(function(i){ return i.id === tile.dataset.quickItem; });
+    if(!item) return;
+    if(item.sellPrice == null){
+      flash('Set a selling price for ' + item.nameEn + ' in the Inventory tab first');
+      return;
+    }
+    openQtyModal(item.id);
+  });
+
+  function closeModal(){
+    document.getElementById('quickModalRoot').innerHTML = '';
+  }
+
+  function openQtyModal(itemId){
+    var item = data.inventory.find(function(i){ return i.id === itemId; });
+    if(!item) return;
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-sub">Adding to ' + esc((activeOrder() || {name:'a new order'}).name) + ' · ' + fmt(item.sellPrice) + ' each</div>' +
+          '<div class="qty-grid">' +
+            [1,2,3,4,5,6].map(function(n){ return '<button class="qty-btn" data-qty="' + n + '">' + n + '</button>'; }).join('') +
+          '</div>' +
+          '<div class="field"><label for="customQty">Other quantity</label>' +
+            '<input class="big-input" id="customQty" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 10"></div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel">Cancel</button>' +
+            '<button class="primary" type="button" id="modalCustomGo">Add to order</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    root.querySelectorAll('[data-qty]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        addToTicket(item, parseInt(btn.dataset.qty, 10));
+      });
+    });
+    document.getElementById('modalCustomGo').addEventListener('click', function(){
+      var n = parseInt(document.getElementById('customQty').value, 10);
+      if(!n || n < 1){ document.getElementById('customQty').focus(); return; }
+      addToTicket(item, n);
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
+  }
+
+  function openPriceModal(itemId, editOnly){
+    var item = data.inventory.find(function(i){ return i.id === itemId; });
+    if(!item) return;
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-sub">' + (editOnly ? 'Update the selling price' : 'What\'s the selling price per ' + esc(item.unit) + '?') + '</div>' +
+          (item.sellPrice != null ? '<div class="remembered-price">Currently ' + fmt(item.sellPrice) + ' each</div>' : '') +
+          '<div class="field"><label for="priceInput">Selling price (RM)</label>' +
+            '<input class="big-input" id="priceInput" type="number" inputmode="decimal" min="0" step="0.01" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" autofocus></div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel">Cancel</button>' +
+            '<button class="primary" type="button" id="modalPriceGo">' + (editOnly ? 'Save price' : 'Save & continue') + '</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    var input = document.getElementById('priceInput');
+    setTimeout(function(){ input.focus(); input.select(); }, 50);
+    document.getElementById('modalPriceGo').addEventListener('click', function(){
+      var p = parseFloat(input.value);
+      if(isNaN(p) || p < 0){ input.focus(); return; }
+      item.sellPrice = p;
+      save();
+      if(editOnly){
+        closeModal();
+        renderQuickGrid();
+        flash('✓ Price saved');
+      } else {
+        openQtyModal(item.id);
+      }
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
+  }
+
+  // ---- open orders (one order per customer; tap items into the active one, then serve each line) ----
+  function activeOrder(){
+    return data.openOrders.find(function(o){ return o.id === data.activeOrderId; }) || null;
+  }
+
+  function createOrder(customName){
+    data.orderCounter += 1;
+    var order = {id: uid('ord'), name: customName || ('Order ' + data.orderCounter), lines: []};
+    data.openOrders.push(order);
+    data.activeOrderId = order.id;
+    save();
+    return order;
+  }
+
+  function renderOrderChips(){
+    var row = document.getElementById('orderChipRow');
+    var chips = data.openOrders.map(function(o){
+      var pending = o.lines.filter(function(l){ return !l.served; }).length;
+      return '<button class="order-chip' + (o.id === data.activeOrderId ? ' active' : '') + '" data-select-order="' + o.id + '">' +
+        esc(o.name) + (pending ? ' (' + pending + ')' : '') + '</button>';
+    }).join('');
+    row.innerHTML = chips + '<button class="order-chip add" type="button" id="addOrderChip">+ Add order 加订单</button>';
+  }
+
+  document.getElementById('orderChipRow').addEventListener('click', function(e){
+    if(e.target.closest('#addOrderChip')){
+      var nm = prompt('Name this order? (optional — e.g. Table 3). Leave blank for auto name.\n给这个订单取个名字？(选填，例如 Table 3)，留空就自动命名。');
+      createOrder(nm && nm.trim() ? nm.trim() : null);
+      renderAll();
+      return;
+    }
+    var sel = e.target.closest('[data-select-order]');
+    if(!sel) return;
+    data.activeOrderId = sel.dataset.selectOrder;
+    save();
+    renderAll();
+  });
+
+  function addToTicket(item, qty){
+    var order = activeOrder() || createOrder();
+    var existing = order.lines.find(function(t){ return t.itemId === item.id && !t.served; });
+    if(existing){
+      existing.qty += qty;
+    } else {
+      order.lines.push({id:uid('t'), itemId:item.id, itemName:label(item), qty:qty, price:item.sellPrice, cost:item.unitCost||0, served:false});
+    }
+    save();
+    closeModal();
+    renderAll();
+    flash('Added ' + item.nameEn + ' × ' + qty + ' to ' + order.name);
+  }
+
+  function serveLine(line){
+    var sale = {id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:line.itemName, qty:line.qty, price:line.price, cost:line.cost};
+    data.orders.push(sale);
+    var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
+    if(inv) inv.qty = Math.max(0, inv.qty - line.qty);
+    line.served = true;
+    line.saleId = sale.id;
+    line.serveTime = sale.time;
+    save();
+    renderAll();
+    flash('✓ ' + line.itemName + ' served');
+  }
+
+  function unserveLine(line){
+    data.orders = data.orders.filter(function(o){ return o.id !== line.saleId; });
+    var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
+    if(inv) inv.qty += line.qty;
+    line.served = false;
+    delete line.saleId;
+    delete line.serveTime;
+    save();
+    renderAll();
+    flash('Undid ' + line.itemName);
+  }
+
+  function renderTicket(){
+    var container = document.getElementById('serveList');
+    var emptyNote = document.getElementById('ticketEmptyNote');
+    var badge = document.getElementById('ticketBadge');
+    var totalPending = 0;
+    data.openOrders.forEach(function(o){ totalPending += o.lines.filter(function(l){ return !l.served; }).length; });
+    badge.hidden = totalPending === 0;
+    badge.textContent = totalPending;
+
+    if(!data.openOrders.length){
+      container.innerHTML = '';
+      emptyNote.style.display = '';
+      return;
+    }
+    emptyNote.style.display = 'none';
+    container.innerHTML = data.openOrders.map(function(order){
+      var pending = order.lines.filter(function(l){ return !l.served; }).length;
+      var linesHtml = order.lines.length ? order.lines.map(function(t){
+        var served = t.served;
+        return '<div class="item-row ' + (served ? 'served' : 'pending') + '" data-line-id="' + t.id + '">' +
+          '<div class="main"><div class="t">' + esc(t.itemName) + '</div>' +
+          '<div class="s">' + t.qty + ' needed' + (served ? ' · served ' + fmtTime(t.serveTime) : '') + '</div></div>' +
+          '<div class="right">' +
+            '<span class="pill ' + (served ? 'served' : 'pending') + '">' + (served ? '✓ Served' : 'Tap when ready') + '</span>' +
+            '<button class="del-btn" data-del-line="' + t.id + '" title="Remove">✕</button>' +
+          '</div></div>';
+      }).join('') : '<div class="empty-note">No items added yet — go to Orders and tap this order\'s chip, then tap items.</div>';
+      return '<div class="card" data-order-id="' + order.id + '" style="margin-bottom:14px;">' +
+        '<div class="section-title" style="margin-bottom:8px; font-size:.95rem;">' + esc(order.name) +
+          (pending ? '<span class="count">' + pending + ' pending</span>' : '<button class="btn-ghost" type="button" data-close-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">✓ Close order</button>') +
+        '</div>' +
+        '<div class="list">' + linesHtml + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  document.getElementById('serveList').addEventListener('click', function(e){
+    var closeBtn = e.target.closest('[data-close-order]');
+    if(closeBtn){
+      var closedId = closeBtn.dataset.closeOrder;
+      data.openOrders = data.openOrders.filter(function(o){ return o.id !== closedId; });
+      if(data.activeOrderId === closedId){
+        data.activeOrderId = data.openOrders.length ? data.openOrders[0].id : null;
+      }
+      save();
+      renderAll();
+      return;
+    }
+    var orderEl = e.target.closest('[data-order-id]');
+    if(!orderEl) return;
+    var order = data.openOrders.find(function(o){ return o.id === orderEl.dataset.orderId; });
+    if(!order) return;
+
+    var delBtn = e.target.closest('[data-del-line]');
+    if(delBtn){
+      var line = order.lines.find(function(l){ return l.id === delBtn.dataset.delLine; });
+      if(!line) return;
+      if(line.served){
+        if(!confirm('Remove "' + line.itemName + '" and reverse its sale?')) return;
+        data.orders = data.orders.filter(function(o){ return o.id !== line.saleId; });
+        var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
+        if(inv) inv.qty += line.qty;
+      }
+      order.lines = order.lines.filter(function(l){ return l.id !== line.id; });
+      save();
+      renderAll();
+      return;
+    }
+
+    var row = e.target.closest('[data-line-id]');
+    if(!row) return;
+    var line2 = order.lines.find(function(l){ return l.id === row.dataset.lineId; });
+    if(!line2) return;
+    if(!line2.served){
+      serveLine(line2);
+    } else {
+      if(!confirm('Undo serving "' + line2.itemName + '"? This reverses the sale.')) return;
+      unserveLine(line2);
+    }
   });
 
   // ---- known menu items (autocomplete + lookup) ----
@@ -497,8 +1267,9 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
       if(!seen[key]){ seen[key] = o.item.trim(); out.push(seen[key]); }
     });
     data.inventory.forEach(function(i){
-      var key = i.name.trim().toLowerCase();
-      if(!seen[key]){ seen[key] = i.name.trim(); out.push(seen[key]); }
+      var lbl = label(i).trim();
+      var key = lbl.toLowerCase();
+      if(!seen[key]){ seen[key] = lbl; out.push(seen[key]); }
     });
     return out.sort(function(a,b){ return a.localeCompare(b); });
   }
@@ -541,7 +1312,7 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
   document.getElementById('clearDataBtn').addEventListener('click', function(){
     if(!confirm('Clear ALL inventory, orders and wastage data on this device? This cannot be undone.')) return;
     if(!confirm('Are you sure? This will permanently erase everything.')) return;
-    data = {inventory:[], orders:[], wastage:[]};
+    data = {inventory:[], orders:[], wastage:[], restocks:[], openOrders:[], orderCounter:0, activeOrderId:null};
     save();
     renderAll();
   });
@@ -617,7 +1388,7 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     document.getElementById('lowStockCount').textContent = low.length;
     var lowEl = document.getElementById('lowStockList');
     lowEl.innerHTML = low.length ? low.map(function(i){
-      return '<div class="alert-row"><span class="name">' + esc(i.name) + '</span>' +
+      return '<div class="alert-row"><span class="name">' + esc(label(i)) + '</span>' +
         '<span class="qty">' + i.qty.toFixed(2) + ' ' + esc(i.unit) + ' left (reorder at ' + i.reorder + ')</span></div>';
     }).join('') : '<div class="empty-note">Everything is stocked above its reorder point.</div>';
 
@@ -633,6 +1404,26 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
     }).join('') : '<div class="empty-note">No activity yet today — log a sale or restock to get started.</div>';
   }
 
+  // ---- restock history ----
+  function renderRestockHistory(){
+    var list = document.getElementById('restockList');
+    document.getElementById('restockCount').textContent = data.restocks.length;
+    if(!data.restocks.length){
+      list.innerHTML = '<div class="empty-note">No restocks logged yet — restock an item from its tile in Inventory.</div>';
+      return;
+    }
+    var sorted = data.restocks.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
+    list.innerHTML = sorted.map(function(r){
+      var t = fmtTime(r.time);
+      var icon = r.type === 'bring' ? '🚚' : (r.type === 'return' ? '↩' : '🛒');
+      var actionLabel = r.type === 'bring' ? 'Brought to stall 带去摆摊' : (r.type === 'return' ? 'Returned to warehouse 退回仓库' : 'Bought from supplier 进货');
+      var sign = r.type === 'return' ? '' : '+';
+      return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
+        '<div class="s">' + icon + ' ' + actionLabel + ' · ' + fmtDate(r.date) + (t ? ' · ' + t : '') + '</div></div>' +
+        '<div class="right"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span></div></div>';
+    }).join('');
+  }
+
   function esc(s){
     return String(s).replace(/[&<>"']/g, function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -641,11 +1432,16 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
 
   function renderAll(){
     renderDashboard();
-    renderInventory();
+    renderInventoryGrid();
     renderOrders();
     renderWastage();
     renderMenuDatalist();
     renderItemLookup();
+    renderQuickGrid();
+    renderOrderChips();
+    renderTicket();
+    renderRestockHistory();
+    renderWarehouseGrid();
   }
   renderAll();
 })();
