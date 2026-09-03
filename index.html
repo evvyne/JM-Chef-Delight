@@ -314,11 +314,19 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   <main>
     <!-- DASHBOARD -->
     <section class="view active" id="view-dashboard">
+      <div class="field" style="margin-bottom:10px;">
+        <label for="dashRange">Show 显示</label>
+        <select id="dashRange"></select>
+      </div>
+      <div class="row2" id="dashCustomRange" style="display:none; margin-bottom:10px;">
+        <div class="field"><label for="dashFrom">From 从</label><input class="big-input" id="dashFrom" type="date"></div>
+        <div class="field"><label for="dashTo">To 到</label><input class="big-input" id="dashTo" type="date"></div>
+      </div>
       <div class="summary-grid">
-        <div class="tile"><div class="label">Revenue today 今日营收</div><div class="value" id="sumRevenue">—</div></div>
-        <div class="tile"><div class="label">Cost today 今日成本</div><div class="value" id="sumCost">—</div></div>
-        <div class="tile profit wide" id="profitTile"><div class="label">Profit today 今日利润</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
-        <div class="tile"><div class="label">Waste (7d) 损耗(7天)</div><div class="value" id="sumWaste">—</div></div>
+        <div class="tile"><div class="label" id="revenueLabel">Revenue today 今日营收</div><div class="value" id="sumRevenue">—</div></div>
+        <div class="tile"><div class="label" id="costLabel">Cost today 今日成本</div><div class="value" id="sumCost">—</div></div>
+        <div class="tile profit wide" id="profitTile"><div class="label" id="profitLabel">Profit today 今日利润</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
+        <div class="tile"><div class="label" id="wasteLabel">Waste today 今日损耗</div><div class="value" id="sumWaste">—</div></div>
         <div class="tile"><div class="label">Stock value 库存价值</div><div class="value" id="sumStockValue">—</div></div>
       </div>
 
@@ -441,7 +449,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       <form class="card" id="wasteForm">
         <div class="section-title" style="margin-bottom:2px;">Log wastage 记录损耗</div>
         <div class="row2">
-          <div class="field"><label for="wasteItem">Item 品项</label><input id="wasteItem" list="menuItemsList" placeholder="e.g. Charsiu Pau 叉烧包" autocomplete="off" required></div>
+          <div class="field"><label for="wasteItem">Item 品项</label><select id="wasteItem" required></select></div>
           <div class="field"><label for="wasteQty">Qty lost 损耗数量</label><input id="wasteQty" type="number" step="0.01" min="0" required></div>
         </div>
         <div class="field"><label for="wasteReason">Reason 原因</label>
@@ -457,7 +465,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       </form>
 
       <div>
-        <div class="section-title">Recent wastage 最近损耗<span class="count" id="wasteCount">0</span></div>
+        <div class="section-title">Today's wastage 今日损耗<span class="count" id="wasteCount">0</span></div>
         <div class="list" id="wasteList" style="margin-top:8px;"></div>
       </div>
     </section>
@@ -1345,18 +1353,45 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   });
 
   // ---- wastage logic ----
+  function wasteItemOptionsHtml(){
+    var byCat = {};
+    CATEGORIES.forEach(function(c){ byCat[c] = []; });
+    data.inventory.forEach(function(i){ (byCat[i.category] || (byCat[i.category]=[])).push(i); });
+    var out = '';
+    CATEGORIES.forEach(function(c){
+      var items = byCat[c] || [];
+      if(!items.length) return;
+      out += '<optgroup label="' + esc(CAT_LABEL[c]) + '">';
+      items.forEach(function(i){
+        out += '<option value="' + i.id + '">' + esc(label(i)) + '</option>';
+      });
+      out += '</optgroup>';
+    });
+    return out;
+  }
+  function renderWasteItemSelect(){
+    var sel = document.getElementById('wasteItem');
+    var prev = sel.value;
+    sel.innerHTML = wasteItemOptionsHtml();
+    if(sel.querySelector('option[value="' + prev + '"]')) sel.value = prev;
+  }
   function renderWastage(){
+    renderWasteItemSelect();
     var list = document.getElementById('wasteList');
-    var sorted = data.wastage.slice().sort(function(a,b){ return b.id.localeCompare(a.id); }).slice(0,30);
-    document.getElementById('wasteCount').textContent = data.wastage.length;
+    var today = todayStr();
+    var sorted = data.wastage.filter(function(w){ return w.date === today; })
+      .slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
+    document.getElementById('wasteCount').textContent = sorted.length;
     if(!sorted.length){
-      list.innerHTML = '<div class="empty-note">No wastage logged. Nice.</div>';
+      list.innerHTML = '<div class="empty-note">No wastage logged today. Nice. 今天还没有损耗记录。</div>';
       return;
     }
     list.innerHTML = sorted.map(function(w){
       var loss = w.qty * (w.unitCost || 0);
+      var inv = w.itemId ? data.inventory.find(function(i){ return i.id === w.itemId; }) : null;
+      var displayName = inv ? label(inv) : w.item;
       return '<div class="item-row">' +
-        '<div class="main"><div class="t">' + esc(w.item) + '</div>' +
+        '<div class="main"><div class="t">' + esc(displayName) + '</div>' +
         '<div class="s">' + fmtDate(w.date) + ' · ' + w.qty + ' · ' + esc(w.reason) + '</div></div>' +
         '<div class="right"><span class="amt bad">-' + fmt(loss) + '</span>' +
         '<button class="del-btn" data-del-waste="' + w.id + '" title="Remove">✕</button></div></div>';
@@ -1365,16 +1400,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('wasteForm').addEventListener('submit', function(e){
     e.preventDefault();
-    var itemText = document.getElementById('wasteItem').value.trim();
+    var itemId = document.getElementById('wasteItem').value;
     var qty = parseFloat(document.getElementById('wasteQty').value);
     var reason = document.getElementById('wasteReason').value;
-    if(!itemText || isNaN(qty)) return;
-    var inv = findInv(itemText);
-    if(!inv){
-      flash('⚠ Pick an item from the list 请从清单里选一个品项');
-      document.getElementById('wasteItem').focus();
-      return;
-    }
+    var inv = data.inventory.find(function(i){ return i.id === itemId; });
+    if(!inv || isNaN(qty)) return;
     var unitCost = inv.unitCost || 0;
     inv.qty = Math.max(0, inv.qty - qty);
     data.wastage.push({id:uid('w'), date:todayStr(), item:label(inv), itemId:inv.id, qty:qty, unitCost:unitCost, reason:reason});
@@ -1392,23 +1422,74 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   });
 
   // ---- dashboard ----
+  var dashRangeValue = 'today';
+  function dashRangeOptionsHtml(){
+    var dates = {};
+    data.orders.forEach(function(o){ dates[o.date] = true; });
+    var dateList = Object.keys(dates).sort().reverse();
+    var today = todayStr();
+    var opts = '<option value="today">Today 今天</option>' +
+      '<option value="month">This month 本月</option>' +
+      '<option value="all">Total profit 总利润</option>' +
+      '<option value="custom">Custom range 自选日期范围</option>';
+    dateList.forEach(function(d){
+      if(d === today) return;
+      opts += '<option value="' + d + '">' + fmtDate(d) + '</option>';
+    });
+    return opts;
+  }
   function renderDashboard(){
     var today = todayStr();
-    var todaysOrders = data.orders.filter(function(o){ return o.date === today; });
-    var revenue = todaysOrders.reduce(function(s,o){ return s + o.qty*o.price; }, 0);
-    var cost = todaysOrders.reduce(function(s,o){ return s + o.qty*(o.cost||0); }, 0);
+    var sel = document.getElementById('dashRange');
+    var prevValue = dashRangeValue;
+    sel.innerHTML = dashRangeOptionsHtml();
+    if(sel.querySelector('option[value="' + prevValue + '"]')) sel.value = prevValue;
+    else { sel.value = 'today'; dashRangeValue = 'today'; }
+
+    var customRow = document.getElementById('dashCustomRange');
+    customRow.style.display = (dashRangeValue === 'custom') ? '' : 'none';
+
+    var inRange;
+    var rangeLabel;
+    if(dashRangeValue === 'all'){
+      inRange = function(){ return true; };
+      rangeLabel = 'Total';
+    } else if(dashRangeValue === 'today'){
+      inRange = function(d){ return d === today; };
+      rangeLabel = 'today';
+    } else if(dashRangeValue === 'month'){
+      var monthPrefix = today.slice(0,7);
+      inRange = function(d){ return d.slice(0,7) === monthPrefix; };
+      rangeLabel = 'this month';
+    } else if(dashRangeValue === 'custom'){
+      var fromV = document.getElementById('dashFrom').value;
+      var toV = document.getElementById('dashTo').value;
+      inRange = function(d){ return (!fromV || d >= fromV) && (!toV || d <= toV); };
+      rangeLabel = (fromV || '…') + ' → ' + (toV || '…');
+    } else {
+      inRange = function(d){ return d === dashRangeValue; };
+      rangeLabel = fmtDate(dashRangeValue);
+    }
+    var rangeOrders = data.orders.filter(function(o){ return inRange(o.date); });
+    var revenue = rangeOrders.reduce(function(s,o){ return s + o.qty*o.price; }, 0);
+    var cost = rangeOrders.reduce(function(s,o){ return s + o.qty*(o.cost||0); }, 0);
     var profit = revenue - cost;
+
+    document.getElementById('revenueLabel').textContent = (dashRangeValue==='all' ? 'Total revenue 总营收' : dashRangeValue==='today' ? 'Revenue today 今日营收' : dashRangeValue==='month' ? 'Revenue this month 本月营收' : 'Revenue ' + rangeLabel);
+    document.getElementById('costLabel').textContent = (dashRangeValue==='all' ? 'Total cost 总成本' : dashRangeValue==='today' ? 'Cost today 今日成本' : dashRangeValue==='month' ? 'Cost this month 本月成本' : 'Cost ' + rangeLabel);
+    document.getElementById('profitLabel').textContent = (dashRangeValue==='all' ? 'Total profit 总利润' : dashRangeValue==='today' ? 'Profit today 今日利润' : dashRangeValue==='month' ? 'Profit this month 本月利润' : 'Profit ' + rangeLabel);
+    document.getElementById('wasteLabel').textContent = (dashRangeValue==='all' ? 'Total waste 总损耗' : dashRangeValue==='today' ? 'Waste today 今日损耗' : dashRangeValue==='month' ? 'Waste this month 本月损耗' : 'Waste ' + rangeLabel);
 
     document.getElementById('sumRevenue').textContent = fmt(revenue);
     document.getElementById('sumCost').textContent = fmt(cost);
     document.getElementById('sumProfit').textContent = fmt(profit);
     var tile = document.getElementById('profitTile');
     tile.classList.toggle('negative', profit < 0);
-    document.getElementById('profitSub').textContent = todaysOrders.length + ' sale' + (todaysOrders.length===1?'':'s') + ' logged today';
+    document.getElementById('profitSub').textContent = rangeOrders.length + ' sale' + (rangeOrders.length===1?'':'s') + ' logged';
 
-    var sevenAgo = new Date(); sevenAgo.setDate(sevenAgo.getDate()-6);
-    var sevenStr = sevenAgo.toISOString().slice(0,10);
-    var wasteTotal = data.wastage.filter(function(w){ return w.date >= sevenStr; })
+    var todaysOrders = data.orders.filter(function(o){ return o.date === today; });
+
+    var wasteTotal = data.wastage.filter(function(w){ return inRange(w.date); })
       .reduce(function(s,w){ return s + w.qty*(w.unitCost||0); }, 0);
     document.getElementById('sumWaste').textContent = fmt(wasteTotal);
 
@@ -1434,6 +1515,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         '<div class="right"><span class="amt ' + (ev.amt>=0?'good':'bad') + '">' + (ev.amt>=0?'':'-') + fmt(Math.abs(ev.amt)) + '</span></div></div>';
     }).join('') : '<div class="empty-note">No activity yet today — log a sale or restock to get started.</div>';
   }
+
+  document.getElementById('dashRange').addEventListener('change', function(){
+    dashRangeValue = this.value;
+    renderDashboard();
+  });
+  document.getElementById('dashFrom').addEventListener('change', renderDashboard);
+  document.getElementById('dashTo').addEventListener('change', renderDashboard);
 
   // ---- restock history ----
   function renderRestockHistory(){
