@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>JM Chef Delight</title>
 <script>
 (function(){
@@ -88,15 +88,26 @@
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 20px -8px rgba(0,0,0,.5);
 }
 
-*{box-sizing:border-box;}
+*{box-sizing:border-box; touch-action:manipulation;}
+html{touch-action:manipulation;}
 body{
   margin:0; background:var(--paper); color:var(--ink);
   font-family:'Public Sans', system-ui, sans-serif;
   -webkit-font-smoothing:antialiased;
+  touch-action:manipulation;
 }
 .app{max-width:520px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--paper);}
 
 /* header */
+.zoom-controls{display:flex; align-items:center; gap:4px;}
+.zoom-btn{
+  border:1px solid var(--line); background:var(--paper-raised); color:var(--ink);
+  border-radius:8px; width:30px; height:30px; font-family:'Public Sans', system-ui, sans-serif;
+  font-weight:700; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
+}
+.zoom-btn:active{background:var(--accent-soft);}
+.zoom-btn.small{font-size:.72rem;}
+.zoom-btn.big{font-size:1.05rem;}
 header.top{
   padding:20px 18px 14px; display:flex; align-items:baseline; justify-content:space-between;
   border-bottom:1px solid var(--line);
@@ -345,8 +356,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 <div class="app">
   <header class="top">
     <h1>JM Chef Delight</h1>
+    <div class="zoom-controls">
+      <button class="zoom-btn small" type="button" id="zoomOutBtn" title="Smaller text 缩小字体">A</button>
+      <button class="zoom-btn big" type="button" id="zoomInBtn" title="Bigger text 放大字体">A</button>
+    </div>
     <span class="date" id="todayLabel"></span>
   </header>
+  <div class="muted-small" id="cloudSyncStatus" style="text-align:center; padding:4px 16px 0;"></div>
 
   <main>
     <!-- DASHBOARD -->
@@ -530,6 +546,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 <div id="quickModalRoot"></div>
 <div class="flash-toast" id="flashToast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 (function(){
   "use strict";
@@ -588,23 +605,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     };
   };
 
-  var data;
-  try{
-    var raw = localStorage.getItem(STORE_KEY);
-    data = raw ? JSON.parse(raw) : seedData();
-  }catch(e){ data = seedData(); }
-  var isExample = !localStorage.getItem(STORE_KEY);
   var uid = function(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2,6); };
-  data.restocks = data.restocks || [];
-  if(!data.openOrders){
-    data.openOrders = [];
-    if(data.currentTicket && data.currentTicket.length){
-      data.openOrders.push({id: uid('ord'), name: 'Order 1', lines: data.currentTicket});
-    }
-  }
-  delete data.currentTicket;
-  data.orderCounter = data.orderCounter || data.openOrders.length;
-  if(data.activeOrderId === undefined) data.activeOrderId = data.openOrders.length ? data.openOrders[0].id : null;
 
   var UNIT_OPTIONS = ["pcs","bowl","plate"];
   function unitOptionsHtml(selected){
@@ -623,20 +624,33 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return out;
   }
 
-  // migrate any older-schema inventory rows (single `name` field) to nameEn/nameZh/category
-  data.inventory.forEach(function(i){
-    if(i.nameEn === undefined){
-      i.nameEn = i.name || 'Unnamed';
-      i.nameZh = i.nameZh || '';
-      i.category = i.category || 'Other';
-      delete i.name;
+  // Runs every migration/backfill step needed to bring a data object (whether loaded
+  // from localStorage or pulled fresh from Supabase) up to the current schema.
+  function runMigrations(d){
+    d.restocks = d.restocks || [];
+    if(!d.openOrders){
+      d.openOrders = [];
+      if(d.currentTicket && d.currentTicket.length){
+        d.openOrders.push({id: uid('ord'), name: 'Order 1', lines: d.currentTicket});
+      }
     }
-    if(i.warehouseQty === undefined) i.warehouseQty = 0;
-  });
-  data.restocks.forEach(function(r){ if(!r.type) r.type = 'buy'; });
+    delete d.currentTicket;
+    d.orderCounter = d.orderCounter || d.openOrders.length;
+    if(d.activeOrderId === undefined) d.activeOrderId = d.openOrders.length ? d.openOrders[0].id : null;
 
-  // make sure the standard 13-item menu is always present, without touching anything already edited
-  var needsSaveAfterBackfill = (function backfillDefaultMenu(){
+    // migrate any older-schema inventory rows (single `name` field) to nameEn/nameZh/category
+    d.inventory.forEach(function(i){
+      if(i.nameEn === undefined){
+        i.nameEn = i.name || 'Unnamed';
+        i.nameZh = i.nameZh || '';
+        i.category = i.category || 'Other';
+        delete i.name;
+      }
+      if(i.warehouseQty === undefined) i.warehouseQty = 0;
+    });
+    d.restocks.forEach(function(r){ if(!r.type) r.type = 'buy'; });
+
+    // make sure the standard 13-item menu is always present, without touching anything already edited
     var defaults = [
       ["Gai Wo Pau","鸡窝包","Pau"], ["Charsiu Pau","叉烧包","Pau"], ["Dai Pau","大包","Pau"],
       ["Sang Yok Pau","生肉包","Pau"], ["Dao Sa Pau","豆沙包","Pau"], ["Lin Yong Pau","莲蓉包","Pau"],
@@ -645,40 +659,108 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       ["Fishball","鱼蛋","Dimsum"],
       ["Red Bean Black Glutinous","红豆糯米","TongSui"], ["Sweet Potato","番薯","TongSui"]
     ];
-    var changed = false;
-    defaults.forEach(function(d){
-      var exists = data.inventory.some(function(i){ return i.nameEn.toLowerCase() === d[0].toLowerCase(); });
+    defaults.forEach(function(def){
+      var exists = d.inventory.some(function(i){ return i.nameEn.toLowerCase() === def[0].toLowerCase(); });
       if(!exists){
-        var unit = d[2] === 'TongSui' ? 'bowl' : 'pcs';
-        data.inventory.push(mkInv(uid('i'), d[0], d[1], d[2], unit, 0, 0, null, null));
-        changed = true;
+        var unit = def[2] === 'TongSui' ? 'bowl' : 'pcs';
+        d.inventory.push(mkInv(uid('i'), def[0], def[1], def[2], unit, 0, 0, null, null));
       }
     });
-    return changed;
-  })();
 
-  // daily refresh: whatever is still unsold at the stall at the start of a new day
-  // automatically goes back into the warehouse tally, so "qty at stall" always starts
-  // fresh each day and nothing is silently lost
-  var needsSaveAfterDailyReset = false;
-  if(data.lastStallResetDate !== todayStr()){
-    if(data.lastStallResetDate){
-      data.inventory.forEach(function(i){
-        if(i.qty > 0){
-          i.warehouseQty += i.qty;
-          data.restocks.push({id:uid('r'), itemId:i.id, itemName:label(i), qty:i.qty, unit:i.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
-          i.qty = 0;
-        }
-      });
+    // daily refresh: whatever is still unsold at the stall at the start of a new day
+    // automatically goes back into the warehouse tally, so "qty at stall" always starts
+    // fresh each day and nothing is silently lost
+    if(d.lastStallResetDate !== todayStr()){
+      if(d.lastStallResetDate){
+        d.inventory.forEach(function(i){
+          if(i.qty > 0){
+            i.warehouseQty += i.qty;
+            d.restocks.push({id:uid('r'), itemId:i.id, itemName:label(i), qty:i.qty, unit:i.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
+            i.qty = 0;
+          }
+        });
+      }
+      d.lastStallResetDate = todayStr();
     }
-    data.lastStallResetDate = todayStr();
-    needsSaveAfterDailyReset = true;
+    return d;
+  }
+
+  var data;
+  try{
+    var raw = localStorage.getItem(STORE_KEY);
+    data = raw ? JSON.parse(raw) : seedData();
+  }catch(e){ data = seedData(); }
+  data = runMigrations(data);
+
+  // ---- cloud sync (Supabase) — keeps a copy in the cloud so nothing is lost if this
+  // device's browser storage gets cleared. Local storage is still used for instant
+  // offline load; Supabase is the durable backup + cross-device copy. ----
+  var SUPABASE_URL = 'https://rpvohvdtynkkuyxjjncj.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJwdm9odmR0eW5ra3V5eGpqbmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTU1MzIsImV4cCI6MjEwNDAzMTUzMn0.7T8ZyYxkhvAjdTNqPfJJ9hH0SMbLatM8AjGpW7DNSAU';
+  var sb = (window.supabase && window.supabase.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
+  var cloudSyncStatusEl = null;
+  function setCloudStatus(text){
+    if(!cloudSyncStatusEl) cloudSyncStatusEl = document.getElementById('cloudSyncStatus');
+    if(cloudSyncStatusEl) cloudSyncStatusEl.textContent = text;
+  }
+
+  var pushTimer = null;
+  function pushToCloud(){
+    if(!sb) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(function(){
+      setCloudStatus('Saving to cloud… 正在同步…');
+      sb.from('app_state').upsert({id:1, data:data, updated_at:new Date().toISOString()}).then(function(res){
+        setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
+      });
+    }, 800);
+  }
+
+  function pullFromCloud(){
+    if(!sb) return;
+    setCloudStatus('Loading from cloud… 正在读取云端…');
+    sb.from('app_state').select('data').eq('id', 1).maybeSingle().then(function(res){
+      if(res.error){ setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料'); return; }
+      if(res.data && res.data.data){
+        data = runMigrations(res.data.data);
+        try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
+        renderAll();
+        setCloudStatus('✓ Synced to cloud 已同步');
+      } else {
+        // no cloud copy yet — push what we have locally as the first cloud copy
+        pushToCloud();
+      }
+    }).catch(function(){
+      setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料');
+    });
   }
 
   var save = function(){
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
+    pushToCloud();
   };
-  if(isExample || needsSaveAfterBackfill || needsSaveAfterDailyReset) save();
+
+  // ---- text/tile zoom (A- / A+) ----
+  var ZOOM_LEVELS = [0.85, 1, 1.15, 1.3, 1.45];
+  var ZOOM_KEY = 'jm_zoom_level';
+  var zoomIdx = (function(){
+    var saved = parseInt(localStorage.getItem(ZOOM_KEY), 10);
+    return (!isNaN(saved) && saved >= 0 && saved < ZOOM_LEVELS.length) ? saved : 1;
+  })();
+  function applyZoom(){
+    document.body.style.zoom = ZOOM_LEVELS[zoomIdx];
+    try{ localStorage.setItem(ZOOM_KEY, String(zoomIdx)); }catch(e){}
+  }
+  applyZoom();
+  document.getElementById('zoomInBtn').addEventListener('click', function(){
+    if(zoomIdx < ZOOM_LEVELS.length - 1){ zoomIdx++; applyZoom(); }
+  });
+  document.getElementById('zoomOutBtn').addEventListener('click', function(){
+    if(zoomIdx > 0){ zoomIdx--; applyZoom(); }
+  });
 
   // ---- tabs ----
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -867,7 +949,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + '</div>' +
+          '<div class="modal-sub" id="whModalSub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + '</div>' +
 
           '<div class="section-title" style="font-size:.85rem; margin:0;">Bought from supplier</div>' +
           '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
@@ -927,6 +1009,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(!n || n < 1){ document.getElementById('bringCustom').focus(); return; }
       bringToStall(item, n);
     });
+    function refreshWhModalSub(){
+      var subEl = document.getElementById('whModalSub');
+      if(subEl) subEl.textContent = '🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost);
+    }
     document.getElementById('whPriceSave').addEventListener('click', function(){
       var cost = parseFloat(document.getElementById('whEditCost').value);
       var priceRaw = document.getElementById('whEditPrice').value;
@@ -934,8 +1020,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       item.unitCost = cost;
       item.sellPrice = priceRaw === '' ? null : parseFloat(priceRaw);
       save();
-      closeModal();
       renderAll();
+      refreshWhModalSub();
       flash('✓ Price/cost updated from today — past sales unaffected');
     });
     document.getElementById('whCatSave').addEventListener('click', function(){
@@ -944,8 +1030,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       var reorderRaw = document.getElementById('whEditReorder').value;
       item.reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
       save();
-      closeModal();
       renderAll();
+      refreshWhModalSub();
       flash('✓ ' + item.nameEn + ' saved');
     });
     document.getElementById('whDelete').addEventListener('click', function(){
@@ -1649,6 +1735,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderWarehouseGrid();
   }
   renderAll();
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
+  pullFromCloud();
 })();
 </script>
 </body>
