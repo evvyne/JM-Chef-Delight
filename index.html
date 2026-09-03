@@ -444,17 +444,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           <div class="field"><label for="wasteItem">Item 品项</label><input id="wasteItem" list="menuItemsList" placeholder="e.g. Charsiu Pau 叉烧包" autocomplete="off" required></div>
           <div class="field"><label for="wasteQty">Qty lost 损耗数量</label><input id="wasteQty" type="number" step="0.01" min="0" required></div>
         </div>
-        <div class="row2">
-          <div class="field"><label for="wasteCost">Unit cost (RM) 单位成本</label><input id="wasteCost" type="number" step="0.01" min="0" placeholder="optional"></div>
-          <div class="field"><label for="wasteReason">Reason 原因</label>
-            <select id="wasteReason">
-              <option>Expired</option>
-              <option>Spoiled</option>
-              <option>Prep error</option>
-              <option>Dropped/damaged</option>
-              <option>Other</option>
-            </select>
-          </div>
+        <div class="field"><label for="wasteReason">Reason 原因</label>
+          <select id="wasteReason">
+            <option>Expired</option>
+            <option>Spoiled</option>
+            <option>Prep error</option>
+            <option>Dropped/damaged</option>
+            <option>Other</option>
+          </select>
         </div>
         <button class="primary" type="submit">Log wastage 记录损耗</button>
       </form>
@@ -615,10 +612,28 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return changed;
   })();
 
+  // daily refresh: whatever is still unsold at the stall at the start of a new day
+  // automatically goes back into the warehouse tally, so "qty at stall" always starts
+  // fresh each day and nothing is silently lost
+  var needsSaveAfterDailyReset = false;
+  if(data.lastStallResetDate !== todayStr()){
+    if(data.lastStallResetDate){
+      data.inventory.forEach(function(i){
+        if(i.qty > 0){
+          i.warehouseQty += i.qty;
+          data.restocks.push({id:uid('r'), itemId:i.id, itemName:label(i), qty:i.qty, unit:i.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
+          i.qty = 0;
+        }
+      });
+    }
+    data.lastStallResetDate = todayStr();
+    needsSaveAfterDailyReset = true;
+  }
+
   var save = function(){
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
   };
-  if(isExample || needsSaveAfterBackfill) save();
+  if(isExample || needsSaveAfterBackfill || needsSaveAfterDailyReset) save();
 
   // ---- tabs ----
   var tabBtns = document.querySelectorAll('.tab-btn');
@@ -636,11 +651,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   // ---- inventory logic ----
   function findInv(text){
-    var n = text.trim().toLowerCase();
+    var n = text.trim().toLowerCase().replace(/\s+/g, ' ');
     return data.inventory.find(function(i){
-      return i.nameEn.toLowerCase() === n ||
-        (i.nameZh && i.nameZh.toLowerCase() === n) ||
-        label(i).toLowerCase() === n;
+      return i.nameEn.toLowerCase().replace(/\s+/g, ' ') === n ||
+        (i.nameZh && i.nameZh.toLowerCase().replace(/\s+/g, ' ') === n) ||
+        label(i).toLowerCase().replace(/\s+/g, ' ') === n;
     });
   }
 
@@ -685,12 +700,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
+          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
 
-          '<div class="row2">' +
-            '<div class="field"><label for="invEditCost">Unit cost (RM)</label><input class="big-input" id="invEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
-            '<div class="field"><label for="invEditPrice">Selling price (RM)</label><input class="big-input" id="invEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
-          '</div>' +
           '<div class="field"><label for="invEditReorder">Reorder at</label><select id="invEditReorder">' + reorderOptionsHtml(item.reorder) + '</select></div>' +
           '<div class="field"><label for="invEditQty">Qty at stall (' + esc(item.unit) + ', for a manual correction)</label><input class="big-input" id="invEditQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.qty + '"></div>' +
 
@@ -713,6 +724,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<details class="manual-entry" style="box-shadow:none;">' +
             '<summary>Advanced</summary>' +
             '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
+              '<div class="row2">' +
+                '<div class="field"><label for="invEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="invEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
+                '<div class="field"><label for="invEditPrice">Selling price (RM) 售价</label><input class="big-input" id="invEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
+              '</div>' +
               '<div class="row2">' +
                 '<div class="field"><label for="invEditCategory">Category</label><select id="invEditCategory">' + categoryOptionsHtml(item.category) + '</select></div>' +
                 '<div class="field"><label for="invEditUnit">Unit</label><select id="invEditUnit">' + unitOptionsHtml(item.unit) + '</select></div>' +
@@ -1034,7 +1049,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">Adding to ' + esc((activeOrder() || {name:'a new order'}).name) + ' · ' + fmt(item.sellPrice) + ' each</div>' +
+          '<div class="modal-sub">Adding to Order ' + esc((activeOrder() || {name: String(data.orderCounter + 1)}).name) + ' · ' + fmt(item.sellPrice) + ' each</div>' +
           '<div class="qty-grid">' +
             [1,2,3,4,5,6].map(function(n){ return '<button class="qty-btn" data-qty="' + n + '">' + n + '</button>'; }).join('') +
           '</div>' +
@@ -1106,13 +1121,17 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return data.openOrders.find(function(o){ return o.id === data.activeOrderId; }) || null;
   }
 
-  function createOrder(customName){
+  function createOrder(){
     data.orderCounter += 1;
-    var order = {id: uid('ord'), name: customName || ('Order ' + data.orderCounter), lines: []};
+    var order = {id: uid('ord'), name: String(data.orderCounter), lines: []};
     data.openOrders.push(order);
     data.activeOrderId = order.id;
     save();
     return order;
+  }
+
+  function orderTotal(order){
+    return order.lines.reduce(function(s, l){ return s + l.qty * l.price; }, 0);
   }
 
   function renderOrderChips(){
@@ -1127,8 +1146,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('orderChipRow').addEventListener('click', function(e){
     if(e.target.closest('#addOrderChip')){
-      var nm = prompt('Name this order? (optional — e.g. Table 3). Leave blank for auto name.\n给这个订单取个名字？(选填，例如 Table 3)，留空就自动命名。');
-      createOrder(nm && nm.trim() ? nm.trim() : null);
+      createOrder();
       renderAll();
       return;
     }
@@ -1150,7 +1168,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     save();
     closeModal();
     renderAll();
-    flash('Added ' + item.nameEn + ' × ' + qty + ' to ' + order.name);
+    flash('Added ' + item.nameEn + ' × ' + qty + ' to Order ' + order.name);
   }
 
   function serveLine(line){
@@ -1206,7 +1224,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '</div></div>';
       }).join('') : '<div class="empty-note">No items added yet — go to Orders and tap this order\'s chip, then tap items.</div>';
       return '<div class="card" data-order-id="' + order.id + '" style="margin-bottom:14px;">' +
-        '<div class="section-title" style="margin-bottom:8px; font-size:.95rem;">' + esc(order.name) +
+        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">' +
+          '<div class="section-title" style="font-size:.95rem; margin-bottom:0;">Order ' + esc(order.name) + '</div>' +
+          '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:1.15rem; font-weight:700; color:var(--good, #16a34a);">' + fmt(orderTotal(order)) + '</div>' +
+        '</div>' +
+        '<div style="display:flex; justify-content:flex-end; margin-bottom:8px;">' +
           (pending ? '<span class="count">' + pending + ' pending</span>' : '<button class="btn-ghost" type="button" data-close-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">✓ Close order</button>') +
         '</div>' +
         '<div class="list">' + linesHtml + '</div>' +
@@ -1343,19 +1365,23 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('wasteForm').addEventListener('submit', function(e){
     e.preventDefault();
-    var item = document.getElementById('wasteItem').value.trim();
+    var itemText = document.getElementById('wasteItem').value.trim();
     var qty = parseFloat(document.getElementById('wasteQty').value);
-    var costRaw = document.getElementById('wasteCost').value;
     var reason = document.getElementById('wasteReason').value;
-    if(!item || isNaN(qty)) return;
-    var unitCost = costRaw === '' ? 0 : parseFloat(costRaw);
-    var inv = findInv(item);
-    if(unitCost === 0 && inv) unitCost = inv.unitCost;
-    if(inv) inv.qty = Math.max(0, inv.qty - qty);
-    data.wastage.push({id:uid('w'), date:todayStr(), item:item, qty:qty, unitCost:unitCost, reason:reason});
+    if(!itemText || isNaN(qty)) return;
+    var inv = findInv(itemText);
+    if(!inv){
+      flash('⚠ Pick an item from the list 请从清单里选一个品项');
+      document.getElementById('wasteItem').focus();
+      return;
+    }
+    var unitCost = inv.unitCost || 0;
+    inv.qty = Math.max(0, inv.qty - qty);
+    data.wastage.push({id:uid('w'), date:todayStr(), item:label(inv), itemId:inv.id, qty:qty, unitCost:unitCost, reason:reason});
     save();
     this.reset();
     renderAll();
+    flash('✓ Logged wastage — ' + qty + ' ' + inv.unit + ' deducted from stall stock');
   });
 
   document.getElementById('wasteList').addEventListener('click', function(e){
