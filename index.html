@@ -413,6 +413,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <div class="section-title" style="margin-bottom:8px;">Tap to edit 点击编辑<span class="count" id="invCount">0</span></div>
         <div class="quick-list" id="invGrid"></div>
       </div>
+    </section>
+
+    <!-- WAREHOUSE -->
+    <section class="view" id="view-warehouse">
+      <div class="muted-small">Stock you've bought but haven't brought out to the stall yet. Buy here when you get stock from a supplier, then bring some out when you head to the truck.</div>
+      <div>
+        <div class="section-title" style="margin-bottom:8px;">Tap an item 点击品项<span class="count" id="whCount">0</span></div>
+        <div class="quick-list" id="warehouseGrid"></div>
+      </div>
 
       <details class="manual-entry">
         <summary>Add a new item 添加新品项</summary>
@@ -447,15 +456,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           <button class="primary" type="submit" style="margin-top:10px;">Add item 添加品项</button>
         </form>
       </details>
-    </section>
-
-    <!-- WAREHOUSE -->
-    <section class="view" id="view-warehouse">
-      <div class="muted-small">Stock you've bought but haven't brought out to the stall yet. Buy here when you get stock from a supplier, then bring some out when you head to the truck.</div>
-      <div>
-        <div class="section-title" style="margin-bottom:8px;">Tap an item 点击品项<span class="count" id="whCount">0</span></div>
-        <div class="quick-list" id="warehouseGrid"></div>
-      </div>
     </section>
 
     <!-- ORDERS -->
@@ -956,7 +956,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     root.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
-          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-title" id="whModalTitle">' + esc(label(item)) + '</div>' +
           '<div class="modal-sub" id="whModalSub">🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost) + '</div>' +
 
           '<div class="section-title" style="font-size:.85rem; margin:0;">Bought from supplier</div>' +
@@ -984,6 +984,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<details class="manual-entry" style="box-shadow:none;">' +
             '<summary>Advanced</summary>' +
             '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
+              '<div class="row2">' +
+                '<div class="field"><label for="whEditNameEn">Name (English)</label><input class="big-input" id="whEditNameEn" value="' + esc(item.nameEn) + '"></div>' +
+                '<div class="field"><label for="whEditNameZh">Name (华文)</label><input class="big-input" id="whEditNameZh" value="' + esc(item.nameZh || '') + '"></div>' +
+              '</div>' +
+              '<button class="btn-ghost" type="button" id="whNameSave" style="width:100%;">Save name 保存名字</button>' +
+
+              '<div class="field"><label for="whEditWarehouseQty">Correct warehouse qty (' + esc(item.unit) + ') 更正仓库数量</label><input class="big-input" id="whEditWarehouseQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.warehouseQty + '"></div>' +
+              '<button class="btn-ghost" type="button" id="whQtySave" style="width:100%;">Save warehouse qty 保存仓库数量</button>' +
+
               '<div class="muted-small" style="margin:0;">Changing price/cost only affects sales from today onward — past sales, profit and totals stay exactly as they were. 换价钱/成本只影响今天以后的销售，之前的记录不会变。</div>' +
               '<div class="row2">' +
                 '<div class="field"><label for="whEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="whEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
@@ -1020,7 +1029,29 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     function refreshWhModalSub(){
       var subEl = document.getElementById('whModalSub');
       if(subEl) subEl.textContent = '🏬 ' + item.warehouseQty + ' in warehouse · 🚚 ' + item.qty + ' at stall · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · cost ' + fmt(item.unitCost);
+      var titleEl = document.getElementById('whModalTitle');
+      if(titleEl) titleEl.textContent = label(item);
     }
+    document.getElementById('whNameSave').addEventListener('click', function(){
+      var nameEn = document.getElementById('whEditNameEn').value.trim();
+      var nameZh = document.getElementById('whEditNameZh').value.trim();
+      if(!nameEn){ flash('⚠ Name (English) can\'t be empty'); return; }
+      item.nameEn = nameEn;
+      item.nameZh = nameZh;
+      save();
+      renderAll();
+      refreshWhModalSub();
+      flash('✓ Name saved');
+    });
+    document.getElementById('whQtySave').addEventListener('click', function(){
+      var qty = parseFloat(document.getElementById('whEditWarehouseQty').value);
+      if(isNaN(qty) || qty < 0) return;
+      item.warehouseQty = qty;
+      save();
+      renderAll();
+      refreshWhModalSub();
+      flash('✓ Warehouse qty corrected to ' + qty + ' ' + item.unit);
+    });
     document.getElementById('whPriceSave').addEventListener('click', function(){
       var cost = parseFloat(document.getElementById('whEditCost').value);
       var priceRaw = document.getElementById('whEditPrice').value;
