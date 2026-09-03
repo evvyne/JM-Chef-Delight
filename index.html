@@ -333,8 +333,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       </div>
 
       <div class="danger-zone">
-        <span class="txt">Wipe all inventory, orders and wastage data on this device. 清除这台设备上所有的数据。</span>
-        <button class="btn-danger" id="clearDataBtn" type="button">Clear all data 清除所有数据</button>
+        <span class="txt">Wipe today's orders, wastage and restock history. Your item list and stock stay untouched. 清除订单、损耗、进货记录,不会动到你的品项和库存。</span>
+        <button class="btn-danger" id="clearDataBtn" type="button">Clear activity 清除记录</button>
       </div>
     </section>
 
@@ -1310,11 +1310,16 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   document.getElementById('itemLookup').addEventListener('change', updateLookupResult);
 
   document.getElementById('clearDataBtn').addEventListener('click', function(){
-    if(!confirm('Clear ALL inventory, orders and wastage data on this device? This cannot be undone.')) return;
-    if(!confirm('Are you sure? This will permanently erase everything.')) return;
-    data = {inventory:[], orders:[], wastage:[], restocks:[], openOrders:[], orderCounter:0, activeOrderId:null};
+    if(!confirm('Clear all sales activity (orders, wastage, restock history)? Your item list — the Pau/Dimsum/Tong Sui items and their stock, prices and cost — stays untouched. This cannot be undone.\n\n清除所有销售记录(订单、损耗、进货记录)？你的品项清单(Pau/Dimsum/Tong Sui 那些)、库存、价钱都不会被动到。这个动作无法撤销。')) return;
+    data.orders = [];
+    data.wastage = [];
+    data.restocks = [];
+    data.openOrders = [];
+    data.orderCounter = 0;
+    data.activeOrderId = null;
     save();
     renderAll();
+    flash('✓ Activity cleared — your items are untouched');
   });
 
   // ---- wastage logic ----
