@@ -406,14 +406,21 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <div class="tile"><div class="label">Stock value 库存价值</div><div class="value" id="sumStockValue">—</div></div>
       </div>
 
-      <div>
-        <div class="section-title">Low stock 库存不足<span class="count" id="lowStockCount">0</span></div>
-        <div class="alert-list" id="lowStockList" style="margin-top:8px;"></div>
-      </div>
+      <details class="manual-entry" id="lowStockDetails" style="box-shadow:none;">
+        <summary>⚠ Low stock 库存不足<span class="count" id="lowStockCount">0</span></summary>
+        <div class="alert-list" id="lowStockList" style="padding:0 16px 12px;"></div>
+      </details>
 
       <div>
         <div class="section-title">Recent activity 最近动态</div>
         <div class="list" id="recentList" style="margin-top:8px;"></div>
+      </div>
+
+      <div class="danger-zone" style="flex-direction:column; align-items:stretch; gap:8px;">
+        <span class="txt">Save a backup file of everything — items, stock, orders, wastage, history — to keep somewhere safe (e.g. share it to WhatsApp/Google Drive). 把所有资料(品项、库存、订单、损耗、记录)存成一个备份档,可以传去 WhatsApp/Google Drive 保存。</span>
+        <button class="btn-ghost" id="backupDataBtn" type="button" style="width:100%;">⬇ Backup now 立即备份</button>
+        <button class="btn-ghost" id="restoreDataBtn" type="button" style="width:100%;">⬆ Restore from backup 从备份还原</button>
+        <input type="file" id="restoreFileInput" accept="application/json" hidden>
       </div>
 
       <div class="danger-zone">
@@ -484,6 +491,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       <div>
         <div class="section-title" style="margin-bottom:8px;">Adding to 加入到<button class="btn-ghost" type="button" id="undoOrderBtn" style="padding:6px 10px; font-size:.72rem;">↩ Undo last</button></div>
         <div class="order-chip-row" id="orderChipRow"></div>
+        <div id="activeOrderTypeRow" style="display:flex; gap:8px; margin-top:8px;"></div>
       </div>
 
       <details class="manual-entry" style="box-shadow:none;">
@@ -573,7 +581,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   <nav class="tabs">
     <button class="tab-btn active" data-view="dashboard"><span class="ic">◈</span><span class="en">Dashboard</span><span class="zh">总览</span></button>
-    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span><span class="en">Stall</span><span class="zh">摊位</span></button>
+    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span><span class="en">Stall</span><span class="zh">摊位</span><span class="tab-badge" id="lowStockBadge" hidden>0</span></button>
     <button class="tab-btn" data-view="warehouse"><span class="ic">🏬</span><span class="en">Warehouse</span><span class="zh">仓库</span></button>
     <button class="tab-btn" data-view="orders"><span class="ic">✎</span><span class="en">Orders</span><span class="zh">点单</span></button>
     <button class="tab-btn" data-view="serve"><span class="ic">☑</span><span class="en">Serve</span><span class="zh">上菜</span><span class="tab-badge" id="ticketBadge" hidden>0</span></button>
@@ -590,7 +598,17 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 (function(){
   "use strict";
   var CUR = "RM";
-  var todayStr = function(){ return new Date().toISOString().slice(0,10); };
+  // "Business day" (YYYY-MM-DD) based on the device's own local clock — NOT UTC — and
+  // rolling over at 3am instead of midnight, since the truck can still be selling past
+  // midnight; a sale at 1am should still count under the day that's ending, not a new one.
+  var todayStr = function(){
+    var d = new Date();
+    var shifted = new Date(d.getTime() - 3 * 60 * 60 * 1000);
+    var y = shifted.getFullYear();
+    var m = String(shifted.getMonth() + 1).padStart(2, '0');
+    var day = String(shifted.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  };
   var fmt = function(n){ return CUR + " " + (Math.round((n+Number.EPSILON)*100)/100).toFixed(2); };
   var fmtDate = function(d){
     return new Date(d).toLocaleDateString('en-MY', {weekday:'short', day:'numeric', month:'short'});
@@ -657,8 +675,19 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
   function reorderOptionsHtml(selected){
     var out = '<option value="">No reminder</option>';
-    for(var n=1;n<=30;n++){
+    var seen = {};
+    function addOpt(n){
+      if(seen[n]) return;
+      seen[n] = true;
       out += '<option value="' + n + '"' + (String(selected)===String(n)?' selected':'') + '>' + n + '</option>';
+    }
+    for(var n=1;n<=50;n++) addOpt(n);
+    for(var n2=60;n2<=100;n2+=10) addOpt(n2);
+    for(var n3=125;n3<=300;n3+=25) addOpt(n3);
+    // If a previously-saved value doesn't land on one of the preset steps above, add it
+    // as its own option so opening this dropdown never silently resets a high custom value.
+    if(selected !== '' && selected != null && !seen[selected]){
+      out += '<option value="' + selected + '" selected>' + selected + '</option>';
     }
     return out;
   }
@@ -711,19 +740,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       d.defaultsSeeded = true;
     }
 
-    // daily refresh: whatever is still unsold at the stall at the start of a new day
-    // automatically goes back into the warehouse tally, so "qty at stall" always starts
-    // fresh each day and nothing is silently lost
+    // daily refresh: just moves the "business day" label forward at the 3am boundary so
+    // Today's orders/wastage/dashboard start fresh — it does NOT touch stall or warehouse
+    // quantities. Whatever is still at the stall stays at the stall; use "Return unsold"
+    // yourself when you actually pack up and bring it back to the warehouse.
     if(d.lastStallResetDate !== todayStr()){
-      if(d.lastStallResetDate){
-        d.inventory.forEach(function(i){
-          if(i.qty > 0){
-            i.warehouseQty += i.qty;
-            d.restocks.push({id:uid('r'), itemId:i.id, itemName:label(i), qty:i.qty, unit:i.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
-            i.qty = 0;
-          }
-        });
-      }
       d.lastStallResetDate = todayStr();
     }
     return d;
@@ -732,10 +753,21 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   var TEST_STORE_KEY = "truckledger_v1_test";
   var testMode = false;
   var realData;
+  var localLoadFailed = false;
   try{
     var raw = localStorage.getItem(STORE_KEY);
-    realData = raw ? JSON.parse(raw) : seedData();
-  }catch(e){ realData = seedData(); }
+    if(raw){
+      realData = JSON.parse(raw);
+    } else {
+      realData = seedData();
+    }
+  }catch(e){
+    // Existing saved data couldn't be read (corrupted or unreadable) — fall back to a
+    // fresh/demo copy so the app still opens, but flag it so we can warn loudly rather
+    // than silently showing what looks like empty/demo data as if it were real.
+    realData = seedData();
+    localLoadFailed = true;
+  }
   realData = runMigrations(realData);
   var data = realData;
 
@@ -821,17 +853,31 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   var pushTimer = null;
+  function pushToCloudNow(){
+    setCloudStatus('Saving to cloud… 正在同步…');
+    var savedAt = realData.lastSavedAt || new Date().toISOString();
+    return sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
+      setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
+    });
+  }
   function pushToCloud(){
     if(!sb || testMode) return;
     clearTimeout(pushTimer);
-    pushTimer = setTimeout(function(){
-      setCloudStatus('Saving to cloud… 正在同步…');
-      var savedAt = realData.lastSavedAt || new Date().toISOString();
-      sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
-        setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
-      });
-    }, 800);
+    pushTimer = setTimeout(pushToCloudNow, 800);
   }
+  // If the page is being closed/backgrounded with a save still waiting out its debounce,
+  // send it immediately instead of losing it — this is the one point where a change made
+  // right before closing the app could otherwise never reach the cloud.
+  function flushPendingCloudPush(){
+    if(!sb || testMode || pushTimer == null) return;
+    clearTimeout(pushTimer);
+    pushTimer = null;
+    pushToCloudNow();
+  }
+  window.addEventListener('pagehide', flushPendingCloudPush);
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'hidden') flushPendingCloudPush();
+  });
 
   // Pulling from the cloud used to always overwrite local data, which could silently
   // discard very recent changes if the last push hadn't finished before the app was
@@ -1111,7 +1157,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     sales.sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
     var rows = sales.map(function(o){
       var t = o.time ? new Date(o.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-      return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--border);">' +
+      return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--line);">' +
         '<span>' + t + (o.orderName ? ' · Order ' + esc(o.orderName) : '') + '</span>' +
         '<span>×' + o.qty + ' · ' + fmt(o.qty * o.price) + '</span>' +
       '</div>';
@@ -1407,7 +1453,23 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       flash('✓ ' + item.nameEn + ' saved');
     });
     document.getElementById('whDelete').addEventListener('click', function(){
-      if(!confirm('Remove "' + label(item) + '" from inventory?')) return;
+      // Warn about anything this delete would silently discard: remaining stock (either
+      // location) and any not-yet-served order lines still pointing at this item — those
+      // would otherwise go stuck/orphaned since the item they reference would be gone.
+      var pendingLines = [];
+      data.openOrders.forEach(function(o){
+        o.lines.forEach(function(l){ if(l.itemId === item.id && !l.served) pendingLines.push(l); });
+      });
+      var warnings = [];
+      if(item.qty > 0) warnings.push(item.qty + ' ' + item.unit + ' still at the stall 摊位还有 ' + item.qty);
+      if(item.warehouseQty > 0) warnings.push(item.warehouseQty + ' ' + item.unit + ' still in the warehouse 仓库还有 ' + item.warehouseQty);
+      if(pendingLines.length) warnings.push(pendingLines.length + ' pending order line(s) not yet served 还有 ' + pendingLines.length + ' 笔订单还没上菜');
+      var msg = 'Remove "' + label(item) + '" from inventory? 确定要删除 "' + label(item) + '" 这个品项吗？\n\nThis cannot be undone. 这个动作无法撤销。';
+      if(warnings.length){
+        msg = '⚠ "' + label(item) + '" still has:\n' + warnings.map(function(w){ return '• ' + w; }).join('\n') +
+          '\n\nDeleting it now will lose that record. Are you sure?\n\n"' + label(item) + '" 还有以上没处理完的东西,删除后这些记录会一起消失,确定吗？';
+      }
+      if(!confirm(msg)) return;
       data.inventory = data.inventory.filter(function(i){ return i.id !== item.id; });
       save();
       closeModal();
@@ -1478,8 +1540,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var costRaw = document.getElementById('orderCost').value;
     var cost = costRaw === '' ? 0 : parseFloat(costRaw);
     if(!item || isNaN(qty) || isNaN(price)) return;
-    data.orders.push({id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:item, qty:qty, price:price, cost:cost});
     var inv = findInv(item);
+    // If the typed name doesn't match an inventory item exactly, stock can't be deducted —
+    // ask before logging so revenue and stock never silently drift apart.
+    if(!inv){
+      var proceed = confirm('"' + item + '" doesn\'t match any item in your inventory list, so stock won\'t be deducted for this sale. Log it anyway?\n\n"' + item + '" 跟库存里的品项对不上,这笔不会扣库存。还是要记录吗？\n\n(Tip: pick a name from the dropdown list to avoid this. 提示：从下拉选单选择品项名字就不会有这个问题。)');
+      if(!proceed) return;
+    }
+    data.orders.push({id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:item, qty:qty, price:price, cost:cost});
     if(inv) inv.qty = Math.max(0, inv.qty - qty);
     save();
     this.reset();
@@ -1495,13 +1563,25 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   });
 
   document.getElementById('undoOrderBtn').addEventListener('click', function(){
-    if(!data.orders.length){ alert('No orders to undo.'); return; }
+    if(!data.orders.length){ alert('No sales to undo. 没有可以撤销的记录。'); return; }
     var last = data.orders[data.orders.length - 1];
-    if(!confirm('Undo last order — "' + last.item + '" × ' + last.qty + '?')) return;
+    // This undoes the single most recent SALE across the whole shop (not just the order
+    // chip you're currently viewing) — the order name is shown so you can see exactly
+    // which one before confirming, in case another order was served more recently.
+    var whichOrder = last.orderName ? (' from Order ' + last.orderName + ' 第 ' + last.orderName + ' 单') : '';
+    if(!confirm('Undo the most recent sale — "' + last.item + '" × ' + last.qty + whichOrder + '?\n\n撤销最近这一笔销售 — "' + last.item + '" × ' + last.qty + whichOrder + '？')) return;
     data.orders.pop();
     var inv = findInv(last.item);
     if(inv) inv.qty += last.qty;
+    if(last.orderId){
+      var openOrder = data.openOrders.find(function(o){ return o.id === last.orderId; });
+      if(openOrder){
+        var line = openOrder.lines.find(function(l){ return l.saleId === last.id; });
+        if(line){ line.served = false; delete line.saleId; delete line.serveTime; }
+      }
+    }
     save(); renderAll();
+    flash('✓ Undone — ' + last.item);
   });
 
   // ---- quick sell (tap buttons for parents) ----
@@ -1532,7 +1612,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="cat-header" style="margin-top:6px;">' + CAT_LABEL[cat] + '</div>';
       items.forEach(function(i){
         var soldOut = i.qty <= 0;
-        html += '<div style="display:flex; justify-content:space-between; align-items:center; font-size:.85rem; padding:5px 0; border-bottom:1px solid var(--border);">' +
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; font-size:.85rem; padding:5px 0; border-bottom:1px solid var(--line);">' +
           '<span' + (soldOut ? ' style="text-decoration:line-through; color:var(--ink-soft);"' : '') + '>' + esc(i.nameEn) + (i.nameZh ? ' ' + esc(i.nameZh) : '') + '</span>' +
           (soldOut
             ? '<span style="color:var(--bad); font-weight:600;">Sold out 卖完了</span>'
@@ -1680,9 +1760,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return data.openOrders.find(function(o){ return o.id === data.activeOrderId; }) || null;
   }
 
+  var ORDER_TYPE_LABEL = {takeaway: '🥡 Takeaway 外带', dinein: '🍽 Send to table 送去桌子'};
+
   function createOrder(){
     data.orderCounter += 1;
-    var order = {id: uid('ord'), name: String(data.orderCounter), lines: []};
+    var order = {id: uid('ord'), name: String(data.orderCounter), lines: [], type: null, paymentMethod: null};
     data.openOrders.push(order);
     data.activeOrderId = order.id;
     save();
@@ -1697,11 +1779,37 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var row = document.getElementById('orderChipRow');
     var chips = data.openOrders.map(function(o){
       var pending = o.lines.filter(function(l){ return !l.served; }).length;
+      var icon = o.type === 'takeaway' ? '🥡 ' : (o.type === 'dinein' ? '🍽 ' : '');
       return '<button class="order-chip' + (o.id === data.activeOrderId ? ' active' : '') + '" data-select-order="' + o.id + '">' +
-        esc(o.name) + (pending ? ' (' + pending + ')' : '') + '</button>';
+        icon + esc(o.name) + (pending ? ' (' + pending + ')' : '') + '</button>';
     }).join('');
     row.innerHTML = chips + '<button class="order-chip add" type="button" id="addOrderChip">+ Add order 加订单</button>';
+    renderActiveOrderType();
   }
+
+  // Lets you mark the currently active order as takeaway or dine-in right from the Orders
+  // tab, so you can tell at a glance (and the customer/kitchen can too) how it's going out.
+  function renderActiveOrderType(){
+    var wrap = document.getElementById('activeOrderTypeRow');
+    if(!wrap) return;
+    var order = activeOrder();
+    if(!order){ wrap.innerHTML = ''; return; }
+    wrap.innerHTML = ['takeaway','dinein'].map(function(t){
+      var active = order.type === t;
+      return '<button class="btn-ghost' + (active ? ' active-type' : '') + '" type="button" data-set-order-type="' + t + '" style="flex:1; padding:8px 6px; font-size:.8rem;' + (active ? ' background:var(--accent-soft); border-color:var(--accent); font-weight:700;' : '') + '">' + ORDER_TYPE_LABEL[t] + '</button>';
+    }).join('');
+  }
+
+  document.getElementById('activeOrderTypeRow').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-set-order-type]');
+    if(!btn) return;
+    var order = activeOrder();
+    if(!order) return;
+    var t = btn.dataset.setOrderType;
+    order.type = (order.type === t) ? null : t; // tap again to clear
+    save();
+    renderAll();
+  });
 
   document.getElementById('orderChipRow').addEventListener('click', function(e){
     if(e.target.closest('#addOrderChip')){
@@ -1716,8 +1824,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderAll();
   });
 
-  function addToTicket(item, qty){
-    var order = activeOrder() || createOrder();
+  // Adds a line to a SPECIFIC order (not necessarily the "active" one on the Orders tab) —
+  // this is what lets you add an item to, say, Order 3 while you're on the Serve tab
+  // looking at Order 3, without touching which order is "active" back on Orders.
+  function addLineToOrder(order, item, qty){
     var existing = order.lines.find(function(t){ return t.itemId === item.id && !t.served; });
     if(existing){
       existing.qty += qty;
@@ -1728,6 +1838,82 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     closeModal();
     renderAll();
     flash('Added ' + item.nameEn + ' × ' + qty + ' to Order ' + order.name);
+  }
+
+  function addToTicket(item, qty){
+    addLineToOrder(activeOrder() || createOrder(), item, qty);
+  }
+
+  // Item-picker modal used from the Serve tab's "➕ Add item" button on an order card —
+  // lets you add more to that exact order without leaving Serve or risking picking the
+  // wrong order chip back on the Orders tab.
+  function openAddItemModal(order){
+    var root = document.getElementById('quickModalRoot');
+    var itemsHtml = CATEGORIES.map(function(cat){
+      var items = sortItems(data.inventory.filter(function(i){ return i.category === cat && i.sellPrice != null; }));
+      if(!items.length) return '';
+      return '<div class="cat-header">' + CAT_LABEL[cat] + '</div><div class="quick-grid">' + items.map(function(i){
+        return '<div class="quick-tile" data-add-item="' + i.id + '">' +
+          '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
+          '<div class="qt-price">' + fmt(i.sellPrice) + ' each</div>' +
+        '</div>';
+      }).join('') + '</div>';
+    }).join('');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">➕ Add to Order ' + esc(order.name) + '</div>' +
+          '<div class="modal-sub">Tap an item to add it to this order 点选品项加进这张单</div>' +
+          '<div style="max-height:52vh; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">' +
+            (itemsHtml || '<div class="empty-note">No items with a price set yet — set one in the Stall tab first.</div>') +
+          '</div>' +
+          '<div class="modal-actions"><button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Close</button></div>' +
+        '</div>' +
+      '</div>';
+    root.querySelectorAll('[data-add-item]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var item = data.inventory.find(function(i){ return i.id === btn.dataset.addItem; });
+        if(item) openQtyModalForOrder(item, order);
+      });
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
+  }
+
+  function openQtyModalForOrder(item, order){
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">' + esc(label(item)) + '</div>' +
+          '<div class="modal-sub">Adding to Order ' + esc(order.name) + ' · ' + fmt(item.sellPrice) + ' each</div>' +
+          '<div class="qty-grid">' +
+            [1,2,3,4,5,6].map(function(n){ return '<button class="qty-btn" data-qty="' + n + '">' + n + '</button>'; }).join('') +
+          '</div>' +
+          '<div class="field"><label for="customQty">Other quantity</label>' +
+            '<input class="big-input" id="customQty" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 10"></div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel">Cancel</button>' +
+            '<button class="primary" type="button" id="modalCustomGo">Add to order</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    root.querySelectorAll('[data-qty]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        addLineToOrder(order, item, parseInt(btn.dataset.qty, 10));
+      });
+    });
+    document.getElementById('modalCustomGo').addEventListener('click', function(){
+      var n = parseInt(document.getElementById('customQty').value, 10);
+      if(!n || n < 1){ document.getElementById('customQty').focus(); return; }
+      addLineToOrder(order, item, n);
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
   }
 
   function serveLine(line, order){
@@ -1783,24 +1969,45 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
             '<button class="del-btn" data-del-line="' + t.id + '" title="Remove">✕</button>' +
           '</div></div>';
       }).join('') : '<div class="empty-note">No items added yet — go to Orders and tap this order\'s chip, then tap items.</div>';
+      var typeTag = order.type ? ('<span class="count" style="margin-left:6px;">' + ORDER_TYPE_LABEL[order.type] + '</span>') : '';
       return '<div class="card" data-order-id="' + order.id + '" style="margin-bottom:14px;">' +
-        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">' +
-          '<div class="section-title" style="font-size:.95rem; margin-bottom:0;">Order ' + esc(order.name) + '</div>' +
-          '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:1.15rem; font-weight:700; color:var(--good, #16a34a);">' + fmt(orderTotal(order)) + '</div>' +
+        '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px; gap:8px;">' +
+          '<div class="section-title" style="font-size:.95rem; margin-bottom:0;">Order ' + esc(order.name) + typeTag + '</div>' +
+          '<div style="display:flex; align-items:center; gap:8px;">' +
+            '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:1.15rem; font-weight:700; color:var(--good, #16a34a);">' + fmt(orderTotal(order)) + '</div>' +
+            '<button class="del-btn" type="button" data-delete-order="' + order.id + '" title="Delete order 删除这张单">✕</button>' +
+          '</div>' +
         '</div>' +
         '<div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">' +
-          '<button class="btn-ghost" type="button" data-cash-calc="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">💵 Calculate change</button>' +
+          '<button class="btn-ghost" type="button" data-add-item-to-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">➕ Add item</button>' +
+          (order.paymentMethod
+            ? '<button class="btn-ghost" type="button" data-mark-paid="' + order.id + '" style="padding:5px 10px; font-size:.72rem; background:#14b8a6; border-color:#14b8a6; color:#fff; font-weight:700;">✓ Paid · ' + esc(order.paymentMethod) + '</button>'
+            : '<button class="btn-ghost" type="button" data-mark-paid="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">💰 Mark paid</button>') +
           (pending ? '<span class="count">' + pending + ' pending</span>' : '<button class="btn-ghost" type="button" data-close-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">✓ Close order</button>') +
-          '<button class="btn-danger" type="button" data-delete-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">🗑 Delete order</button>' +
         '</div>' +
         '<div class="list">' + linesHtml + '</div>' +
       '</div>';
     }).join('');
   }
 
-  function finalizeOrderPayment(order, method){
+  // Marking an order "paid" and actually CLOSING it (removing it from the open list) are
+  // now two separate, independent actions — you can mark paid the moment the customer
+  // pays (even before everything's served), and only close once it's paid AND fully
+  // served, whenever you get around to pressing that button yourself.
+  function markOrderPaid(order, method){
+    order.paymentMethod = method;
+    save();
+    closeModal();
+    renderAll();
+    flash('✓ Order ' + order.name + ' marked paid — ' + method);
+  }
+
+  function closeOrder(order){
+    // The payment method chosen via "Mark paid" (if any) is stamped onto each served
+    // line's underlying sale record here, at close time, for revenue/payment reporting.
+    var method = order.paymentMethod;
     order.lines.forEach(function(line){
-      if(line.saleId){
+      if(line.saleId && method){
         var sale = data.orders.find(function(o){ return o.id === line.saleId; });
         if(sale) sale.paymentMethod = method;
       }
@@ -1810,21 +2017,20 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       data.activeOrderId = data.openOrders.length ? data.openOrders[0].id : null;
     }
     save();
-    closeModal();
     renderAll();
-    flash('✓ Order ' + order.name + ' closed — ' + method);
+    flash('✓ Order ' + order.name + ' closed' + (method ? ' — ' + method : ''));
   }
 
-  function openPaymentModal(order){
+  function openMarkPaidModal(order){
     var root = document.getElementById('quickModalRoot');
     root.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">Order ' + esc(order.name) + '</div>' +
-          '<div class="modal-sub">' + fmt(orderTotal(order)) + ' — how did the customer pay? 顾客怎么付钱？</div>' +
+          '<div class="modal-sub">' + fmt(orderTotal(order)) + ' — how did the customer pay? 顾客怎么付钱？ (This just marks it paid — it doesn\'t close the order. 这个只是标记已付款，不会结单。)</div>' +
           '<div class="qty-grid" style="grid-template-columns:1fr 1fr;">' +
             '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="Cash">💵 Cash 现金</button>' +
-            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="DuitNow">📱 DuitNow</button>' +
+            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="DuitNow">📱 QR / DuitNow</button>' +
           '</div>' +
           '<div class="modal-actions">' +
             '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Cancel</button>' +
@@ -1835,9 +2041,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       btn.addEventListener('click', function(){
         var method = btn.dataset.pay;
         if(method === 'Cash'){
-          openCashChangeModal(order);
+          openCashChangeModal(order, 'markPaid');
         } else {
-          finalizeOrderPayment(order, method);
+          markOrderPaid(order, method);
         }
       });
     });
@@ -1847,7 +2053,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
   }
 
-  function openCashChangeModal(order, standalone){
+  // mode: 'standalone' (pure calculator, no side effects) or 'markPaid' (records the
+  // order as paid by cash once confirmed, but never closes the order by itself).
+  function openCashChangeModal(order, mode){
+    var standalone = mode === 'standalone';
     var total = orderTotal(order);
     var root = document.getElementById('quickModalRoot');
     root.innerHTML =
@@ -1867,7 +2076,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="modal-sub" id="cashChangeResult" style="font-size:1.15rem; font-weight:600; margin-top:4px;"></div>' +
           '<div class="modal-actions">' +
             '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">' + (standalone ? 'Close' : 'Back') + '</button>' +
-            (standalone ? '' : '<button class="primary" type="button" id="cashConfirm" style="width:100%;">✓ Done, close order</button>') +
+            (standalone ? '' : '<button class="primary" type="button" id="cashConfirm" style="width:100%;">✓ Mark as paid</button>') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -1898,11 +2107,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
     if(!standalone){
       document.getElementById('cashConfirm').addEventListener('click', function(){
-        finalizeOrderPayment(order, 'Cash');
+        markOrderPaid(order, 'Cash');
       });
     }
     document.getElementById('modalCancel').addEventListener('click', function(){
-      if(standalone){ closeModal(); } else { openPaymentModal(order); }
+      if(standalone){ closeModal(); } else { openMarkPaidModal(order); }
     });
     document.getElementById('modalBackdrop').addEventListener('click', function(e){
       if(e.target.id === 'modalBackdrop') closeModal();
@@ -1910,17 +2119,40 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   document.getElementById('serveList').addEventListener('click', function(e){
-    var cashCalcBtn = e.target.closest('[data-cash-calc]');
-    if(cashCalcBtn){
-      var calcOrder = data.openOrders.find(function(o){ return o.id === cashCalcBtn.dataset.cashCalc; });
-      if(calcOrder) openCashChangeModal(calcOrder, true);
+    var addItemBtn = e.target.closest('[data-add-item-to-order]');
+    if(addItemBtn){
+      var addOrder = data.openOrders.find(function(o){ return o.id === addItemBtn.dataset.addItemToOrder; });
+      if(addOrder) openAddItemModal(addOrder);
+      return;
+    }
+    var markPaidBtn = e.target.closest('[data-mark-paid]');
+    if(markPaidBtn){
+      var payOrder = data.openOrders.find(function(o){ return o.id === markPaidBtn.dataset.markPaid; });
+      if(!payOrder) return;
+      if(payOrder.paymentMethod){
+        // Already marked paid — tapping it again offers to undo the mistake. This only
+        // clears the label on the still-open order; it never touches revenue/profit,
+        // because sales are counted the moment each item is SERVED, not when marked paid.
+        if(confirm('Undo "Paid" for Order ' + payOrder.name + '? It will go back to unpaid.\n\n撤销订单 ' + payOrder.name + ' 的「已付款」标记？会变回未付款。')){
+          payOrder.paymentMethod = null;
+          save();
+          renderAll();
+          flash('Marked unpaid — Order ' + payOrder.name);
+        }
+      } else {
+        openMarkPaidModal(payOrder);
+      }
       return;
     }
     var closeBtn = e.target.closest('[data-close-order]');
     if(closeBtn){
       var closedId = closeBtn.dataset.closeOrder;
       var closedOrder = data.openOrders.find(function(o){ return o.id === closedId; });
-      if(closedOrder) openPaymentModal(closedOrder);
+      if(!closedOrder) return;
+      if(!closedOrder.paymentMethod){
+        if(!confirm('This order hasn\'t been marked paid yet. Close it anyway?\n\n这张单还没标记已付款，确定要结单吗？')) return;
+      }
+      closeOrder(closedOrder);
       return;
     }
     var deleteBtn = e.target.closest('[data-delete-order]');
@@ -2032,8 +2264,66 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('itemLookup').addEventListener('change', updateLookupResult);
 
+  // ---- backup / restore — a real file the user can save/share, on top of the quiet
+  // local safety copy kept before "Clear activity" ----
+  document.getElementById('backupDataBtn').addEventListener('click', function(){
+    try{
+      var payload = JSON.stringify(realData, null, 2);
+      var blob = new Blob([payload], {type:'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      var stamp = todayStr();
+      a.href = url;
+      a.download = 'jm-chef-delight-backup-' + stamp + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      flash('✓ Backup downloaded 备份已下载');
+    }catch(e){
+      alert('Backup failed — please try again. 备份失败,请再试一次。');
+    }
+  });
+
+  document.getElementById('restoreDataBtn').addEventListener('click', function(){
+    document.getElementById('restoreFileInput').click();
+  });
+
+  document.getElementById('restoreFileInput').addEventListener('change', function(e){
+    var file = e.target.files && e.target.files[0];
+    this.value = ''; // allow picking the same file again later
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var parsed;
+      try{ parsed = JSON.parse(reader.result); }
+      catch(err){ alert('This file doesn\'t look like a valid backup. 这个档案看起来不是有效的备份档。'); return; }
+      if(!parsed || !Array.isArray(parsed.inventory)){
+        alert('This file doesn\'t look like a valid backup. 这个档案看起来不是有效的备份档。');
+        return;
+      }
+      if(!confirm('⚠ Restore this backup? This REPLACES everything currently on this device (items, stock, orders, wastage, history) with what\'s in the backup file. Your current data is not automatically saved first — back it up now if you want to keep it.\n\n⚠ 要还原这个备份吗？这会把这台设备现在的所有资料(品项、库存、订单、损耗、记录)整个换成备份档里的内容。现在的资料不会自动先存起来,如果想保留,请先按「立即备份」。\n\nContinue? 确定继续？')) return;
+      testMode = false;
+      realData = runMigrations(parsed);
+      data = realData;
+      try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(err){}
+      save();
+      updateTestBanner();
+      renderAll();
+      flash('✓ Backup restored 备份已还原');
+    };
+    reader.onerror = function(){
+      alert('Could not read that file. 无法读取这个档案。');
+    };
+    reader.readAsText(file);
+  });
+
   document.getElementById('clearDataBtn').addEventListener('click', function(){
-    if(!confirm('Clear all sales activity (orders, wastage, restock history)? Your item list — the Pau/Dimsum/Tong Sui items and their stock, prices and cost — stays untouched. This cannot be undone.\n\n清除所有销售记录(订单、损耗、进货记录)？你的品项清单(Pau/Dimsum/Tong Sui 那些)、库存、价钱都不会被动到。这个动作无法撤销。')) return;
+    if(!confirm('⚠ This deletes ALL sales, wastage and restock history — press "⬇ Backup now" above first if you want to keep a copy you can restore later. Your item list and stock stay untouched.\n\n⚠ 这会删除全部的订单、损耗、进货记录 — 如果想留底,先按上面的「⬇ 立即备份」,以后可以还原。你的品项清单和库存不会被动到。\n\nContinue? 确定继续？')) return;
+    // Keep one quiet local safety copy of everything right before wiping it — there's no
+    // restore button for this (out of scope), but it means the data isn't truly gone if
+    // it's ever needed to manually recover from.
+    try{ localStorage.setItem(STORE_KEY + '_last_clear_backup', JSON.stringify(data)); }catch(e){}
     data.orders = [];
     data.wastage = [];
     data.restocks = [];
@@ -2216,11 +2506,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     document.getElementById('sumNetProfit').textContent = fmt(netProfit);
     document.getElementById('netProfitTile').classList.toggle('negative', netProfit < 0);
 
-    var stockValue = data.inventory.reduce(function(s,i){ return s + i.qty*i.unitCost; }, 0);
+    // Stock value counts BOTH stall and warehouse qty — stock you've bought but haven't
+    // brought out to the stall yet is still stock you paid for and still own.
+    var stockValue = data.inventory.reduce(function(s,i){ return s + (i.qty + i.warehouseQty)*i.unitCost; }, 0);
     document.getElementById('sumStockValue').textContent = fmt(stockValue);
 
     var low = data.inventory.filter(function(i){ return i.reorder != null && (i.qty + i.warehouseQty) <= i.reorder; });
     document.getElementById('lowStockCount').textContent = low.length;
+    var lowBadge = document.getElementById('lowStockBadge');
+    if(lowBadge){ lowBadge.hidden = low.length === 0; lowBadge.textContent = low.length; }
     var lowEl = document.getElementById('lowStockList');
     lowEl.innerHTML = low.length ? low.map(function(i){
       var total = i.qty + i.warehouseQty;
@@ -2311,16 +2605,32 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       list.innerHTML = '<div class="empty-note">No restocks logged yet — restock an item from its tile in Inventory.</div>';
       return;
     }
+    var today = todayStr();
     var sorted = data.restocks.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
-    list.innerHTML = sorted.map(function(r){
-      var t = fmtTime(r.time);
-      var icon = r.type === 'bring' ? '🚚' : (r.type === 'return' ? '↩' : '🛒');
-      var actionLabel = r.type === 'bring' ? 'Brought to stall 带去摆摊' : (r.type === 'return' ? 'Returned to warehouse 退回仓库' : 'Bought from supplier 进货');
-      var sign = r.type === 'return' ? '' : '+';
-      return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
-        '<div class="s">' + icon + ' ' + actionLabel + ' · ' + fmtDate(r.date) + (t ? ' · ' + t : '') + '</div></div>' +
-        '<div class="right" style="display:flex; align-items:center; gap:8px;"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span>' +
-        '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button></div></div>';
+    // group by date — today's list stays open, older days collapse into a tap-to-expand
+    // row so nothing is ever hidden or deleted, just tucked away to keep today tidy
+    var groups = {}; var dateOrder = [];
+    sorted.forEach(function(r){
+      if(!groups[r.date]){ groups[r.date] = []; dateOrder.push(r.date); }
+      groups[r.date].push(r);
+    });
+    list.innerHTML = dateOrder.map(function(date){
+      var entries = groups[date];
+      var isToday = date === today;
+      var rowsHtml = entries.map(function(r){
+        var t = fmtTime(r.time);
+        var icon = r.type === 'bring' ? '🚚' : (r.type === 'return' ? '↩' : '🛒');
+        var actionLabel = r.type === 'bring' ? 'Brought to stall 带去摆摊' : (r.type === 'return' ? 'Returned to warehouse 退回仓库' : 'Bought from supplier 进货');
+        var sign = r.type === 'return' ? '' : '+';
+        return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
+          '<div class="s">' + icon + ' ' + actionLabel + (t ? ' · ' + t : '') + '</div></div>' +
+          '<div class="right" style="display:flex; align-items:center; gap:8px;"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span>' +
+          '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button></div></div>';
+      }).join('');
+      return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
+        '<summary>' + fmtDate(date) + (isToday ? ' · Today 今天' : '') + ' — ' + entries.length + '</summary>' +
+        '<div style="padding:0 16px 12px;">' + rowsHtml + '</div>' +
+      '</details>';
     }).join('');
   }
 
@@ -2370,7 +2680,33 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
   renderAll();
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
+  if(localLoadFailed){
+    setTimeout(function(){
+      alert('⚠ Could not read your saved data on this device — showing a fresh copy instead. If you have a cloud backup on another device, this should recover automatically in a moment; if not, please tell your daughter.\n\n⚠ 这台设备读不到之前存的资料，现在显示的是全新的一份。如果其他设备上有云端备份，等一下应该会自动恢复；如果没有，请告诉女儿。');
+    }, 300);
+  }
   pullFromCloud();
+
+  // Periodically re-check the cloud so two devices open at the same time (e.g. mom's
+  // tablet and dad's phone) converge quickly instead of only syncing once at startup —
+  // this shrinks the window where one device's save could overwrite the other's from
+  // "however long the app stays open" down to about 20 seconds. pullFromCloud() already
+  // only takes the cloud copy if it's actually newer, so this is safe to call repeatedly.
+  setInterval(function(){
+    if(!testMode) pullFromCloud();
+  }, 20000);
+
+  // Keep the "business day" (3am boundary) correct even if the app is left open overnight —
+  // checks once a minute and, if the day has moved on, refreshes the labels/lists to match.
+  // Never touches stall or warehouse quantities.
+  setInterval(function(){
+    var d = todayStr();
+    if(data.lastStallResetDate !== d){
+      data.lastStallResetDate = d;
+      save();
+      renderAll();
+    }
+  }, 60000);
 })();
 </script>
 </body>
