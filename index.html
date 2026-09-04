@@ -1983,9 +1983,34 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       var sign = r.type === 'return' ? '' : '+';
       return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
         '<div class="s">' + icon + ' ' + actionLabel + ' · ' + fmtDate(r.date) + (t ? ' · ' + t : '') + '</div></div>' +
-        '<div class="right"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span></div></div>';
+        '<div class="right" style="display:flex; align-items:center; gap:8px;"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span>' +
+        '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button></div></div>';
     }).join('');
   }
+
+  document.getElementById('restockList').addEventListener('click', function(e){
+    var btn = e.target.closest('[data-del-restock]');
+    if(!btn) return;
+    var r = data.restocks.find(function(x){ return x.id === btn.dataset.delRestock; });
+    if(!r) return;
+    if(!confirm('Delete this record and undo it? ' + r.itemName + ' ' + (r.type === 'return' ? '-' : '+') + r.qty + ' ' + r.unit + ' will be reversed.\n\n删除这条记录并撤销？' + r.itemName + ' 的数量会自动改回去。')) return;
+    var item = data.inventory.find(function(i){ return i.id === r.itemId; });
+    if(item){
+      if(r.type === 'buy'){
+        item.warehouseQty = Math.max(0, item.warehouseQty - r.qty);
+      } else if(r.type === 'bring'){
+        item.qty = Math.max(0, item.qty - r.qty);
+        item.warehouseQty += r.qty;
+      } else if(r.type === 'return'){
+        item.warehouseQty = Math.max(0, item.warehouseQty - r.qty);
+        item.qty += r.qty;
+      }
+    }
+    data.restocks = data.restocks.filter(function(x){ return x.id !== r.id; });
+    save();
+    renderAll();
+    flash(item ? ('✓ Undone — ' + r.itemName) : ('✓ Record removed (item no longer exists)'));
+  });
 
   function esc(s){
     return String(s).replace(/[&<>"']/g, function(c){
