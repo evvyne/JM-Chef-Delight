@@ -294,6 +294,9 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
   display:flex; flex-direction:column; justify-content:center; gap:3px;
 }
 .quick-tile:active{background:var(--accent-soft); border-color:var(--accent);}
+.quick-tile.sold-out{background:var(--paper); opacity:.55; cursor:not-allowed;}
+.quick-tile.sold-out:active{background:var(--paper); border-color:var(--line);}
+.quick-tile.sold-out .qt-stock{color:var(--bad); font-weight:600;}
 .quick-tile .qt-name{font-weight:700; font-size:.92rem; line-height:1.25;}
 .quick-tile .qt-name .zh{display:block; font-weight:600; font-size:.86rem; color:var(--ink-soft);}
 .cat-header{
@@ -409,6 +412,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       <details class="manual-entry" id="lowStockDetails" style="box-shadow:none;">
         <summary>⚠ Low stock 库存不足<span class="count" id="lowStockCount">0</span></summary>
         <div class="alert-list" id="lowStockList" style="padding:0 16px 12px;"></div>
+      </details>
+
+      <details class="manual-entry" id="paymentBreakdownDetails" style="box-shadow:none;">
+        <summary>💳 Payment breakdown 收款方式明细<span class="count" id="paymentBreakdownTotal">—</span></summary>
+        <div id="paymentBreakdownList" style="padding:0 16px 12px;"></div>
       </details>
 
       <div>
@@ -1636,11 +1644,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var priceLabel = (i.sellPrice != null) ? fmt(i.sellPrice) + ' each' : 'Set price in Inventory';
-        return '<div class="quick-tile" data-quick-item="' + i.id + '">' +
+        var soldOut = i.qty <= 0;
+        return '<div class="quick-tile' + (soldOut ? ' sold-out' : '') + '" data-quick-item="' + i.id + '">' +
           (reorderMode ? '' : '<button class="qt-edit" data-edit-price="' + i.id + '" title="Edit selling price">✎</button>') +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
           '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
-          '<div class="qt-stock">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left</div>' +
+          '<div class="qt-stock">' + (soldOut ? 'Sold out 卖完了' : (i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left')) + '</div>' +
           (reorderMode ? moveArrowsHtml(i.id, idx, items) : '') +
           '</div>';
       }).join('') + '</div>';
@@ -1668,6 +1677,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(!tile) return;
     var item = data.inventory.find(function(i){ return i.id === tile.dataset.quickItem; });
     if(!item) return;
+    if(item.qty <= 0){
+      flash('Sold out — bring more from the Stall tab first 卖完了,先在 Stall 分页带货出来');
+      return;
+    }
     if(item.sellPrice == null){
       flash('Set a selling price for ' + item.nameEn + ' in the Inventory tab first');
       return;
@@ -1761,6 +1774,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   var ORDER_TYPE_LABEL = {takeaway: '🥡 Takeaway 外带', dinein: '🍽 Send to table 送去桌子'};
+  var PAY_TAG = {Cash: '💵 Cash', DuitNow: '📱 DN'};
 
   function createOrder(){
     data.orderCounter += 1;
@@ -1853,9 +1867,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat && i.sellPrice != null; }));
       if(!items.length) return '';
       return '<div class="cat-header">' + CAT_LABEL[cat] + '</div><div class="quick-grid">' + items.map(function(i){
-        return '<div class="quick-tile" data-add-item="' + i.id + '">' +
+        var soldOut = i.qty <= 0;
+        return '<div class="quick-tile' + (soldOut ? ' sold-out' : '') + '" data-add-item="' + i.id + '">' +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
           '<div class="qt-price">' + fmt(i.sellPrice) + ' each</div>' +
+          '<div class="qt-stock">' + (soldOut ? 'Sold out 卖完了' : (i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left')) + '</div>' +
         '</div>';
       }).join('') + '</div>';
     }).join('');
@@ -1873,7 +1889,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     root.querySelectorAll('[data-add-item]').forEach(function(btn){
       btn.addEventListener('click', function(){
         var item = data.inventory.find(function(i){ return i.id === btn.dataset.addItem; });
-        if(item) openQtyModalForOrder(item, order);
+        if(!item) return;
+        if(item.qty <= 0){
+          flash('Sold out — bring more from the Stall tab first 卖完了,先在 Stall 分页带货出来');
+          return;
+        }
+        openQtyModalForOrder(item, order);
       });
     });
     document.getElementById('modalCancel').addEventListener('click', closeModal);
@@ -1918,7 +1939,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   function serveLine(line, order){
     var sale = {id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:line.itemName, qty:line.qty, price:line.price, cost:line.cost,
-      orderId: order ? order.id : undefined, orderName: order ? order.name : undefined};
+      orderId: order ? order.id : undefined, orderName: order ? order.name : undefined,
+      // If this order was already marked paid before this particular item got served
+      // (e.g. paid upfront, food comes out after), carry that payment method over
+      // immediately so it shows correctly on the Dashboard right away.
+      paymentMethod: order ? order.paymentMethod : undefined};
     data.orders.push(sale);
     var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
     if(inv) inv.qty = Math.max(0, inv.qty - line.qty);
@@ -1990,12 +2015,25 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }).join('');
   }
 
+  // Stamps (or clears, when method is null) the payment method onto every already-served
+  // line's underlying sale record — called immediately whenever the payment status
+  // changes, so the Dashboard's payment breakdown reflects it right away instead of only
+  // after the order is eventually closed.
+  function applyPaymentMethodToOrderSales(order, method){
+    order.lines.forEach(function(line){
+      if(!line.saleId) return;
+      var sale = data.orders.find(function(o){ return o.id === line.saleId; });
+      if(sale) sale.paymentMethod = method || undefined;
+    });
+  }
+
   // Marking an order "paid" and actually CLOSING it (removing it from the open list) are
-  // now two separate, independent actions — you can mark paid the moment the customer
-  // pays (even before everything's served), and only close once it's paid AND fully
-  // served, whenever you get around to pressing that button yourself.
+  // two separate, independent actions — you can mark paid the moment the customer pays
+  // (even before everything's served), and only close once it's paid AND fully served,
+  // whenever you get around to pressing that button yourself.
   function markOrderPaid(order, method){
     order.paymentMethod = method;
+    applyPaymentMethodToOrderSales(order, method);
     save();
     closeModal();
     renderAll();
@@ -2003,22 +2041,16 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   function closeOrder(order){
-    // The payment method chosen via "Mark paid" (if any) is stamped onto each served
-    // line's underlying sale record here, at close time, for revenue/payment reporting.
-    var method = order.paymentMethod;
-    order.lines.forEach(function(line){
-      if(line.saleId && method){
-        var sale = data.orders.find(function(o){ return o.id === line.saleId; });
-        if(sale) sale.paymentMethod = method;
-      }
-    });
+    // Payment method is already kept in sync as-you-go (see markOrderPaid / serveLine),
+    // but this is re-applied here too as a defensive safety net.
+    applyPaymentMethodToOrderSales(order, order.paymentMethod);
     data.openOrders = data.openOrders.filter(function(o){ return o.id !== order.id; });
     if(data.activeOrderId === order.id){
       data.activeOrderId = data.openOrders.length ? data.openOrders[0].id : null;
     }
     save();
     renderAll();
-    flash('✓ Order ' + order.name + ' closed' + (method ? ' — ' + method : ''));
+    flash('✓ Order ' + order.name + ' closed' + (order.paymentMethod ? ' — ' + order.paymentMethod : ''));
   }
 
   function openMarkPaidModal(order){
@@ -2030,7 +2062,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="modal-sub">' + fmt(orderTotal(order)) + ' — how did the customer pay? 顾客怎么付钱？ (This just marks it paid — it doesn\'t close the order. 这个只是标记已付款，不会结单。)</div>' +
           '<div class="qty-grid" style="grid-template-columns:1fr 1fr;">' +
             '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="Cash">💵 Cash 现金</button>' +
-            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="DuitNow">📱 QR / DuitNow</button>' +
+            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-pay="DuitNow">📱 DuitNow</button>' +
           '</div>' +
           '<div class="modal-actions">' +
             '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Cancel</button>' +
@@ -2135,6 +2167,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         // because sales are counted the moment each item is SERVED, not when marked paid.
         if(confirm('Undo "Paid" for Order ' + payOrder.name + '? It will go back to unpaid.\n\n撤销订单 ' + payOrder.name + ' 的「已付款」标记？会变回未付款。')){
           payOrder.paymentMethod = null;
+          applyPaymentMethodToOrderSales(payOrder, null);
           save();
           renderAll();
           flash('Marked unpaid — Order ' + payOrder.name);
@@ -2445,6 +2478,59 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
     return opts;
   }
+  // Payment-method reconciliation dropdown on the Dashboard — groups the sales in the
+  // currently selected date range by how the customer paid (Cash/DuitNow), showing
+  // which order fell under each and a running total, so it's easy to check against a
+  // bank/e-wallet statement. Follows the same date range as the rest of the Dashboard.
+  function renderPaymentBreakdown(rangeOrders){
+    var wrap = document.getElementById('paymentBreakdownList');
+    if(!wrap) return;
+    var orderGroups = {};
+    var orderIdList = [];
+    var unlinkedTotal = 0;
+    rangeOrders.forEach(function(o){
+      if(o.orderId){
+        var g = orderGroups[o.orderId];
+        if(!g){
+          g = orderGroups[o.orderId] = {orderName:o.orderName, amt:0, paymentMethod:null};
+          orderIdList.push(o.orderId);
+        }
+        g.amt += o.qty*o.price;
+        if(o.paymentMethod) g.paymentMethod = o.paymentMethod;
+      } else {
+        unlinkedTotal += o.qty*o.price;
+      }
+    });
+    var byMethod = {Cash:[], DuitNow:[], _none:[]};
+    orderIdList.forEach(function(id){
+      var g = orderGroups[id];
+      var key = (g.paymentMethod && byMethod[g.paymentMethod]) ? g.paymentMethod : '_none';
+      byMethod[key].push({label:'Order ' + g.orderName, amt:g.amt});
+    });
+    if(unlinkedTotal !== 0){
+      byMethod._none.push({label:'Manually logged sales 手动输入的销售', amt:unlinkedTotal});
+    }
+    var methodOrder = ['Cash','DuitNow','_none'];
+    var methodLabel = {Cash:'💵 Cash 现金', DuitNow:'📱 DuitNow', _none:'❔ Not recorded 未记录付款方式'};
+    var grandTotal = 0;
+    var sections = methodOrder.map(function(key){
+      var entries = byMethod[key];
+      var subtotal = entries.reduce(function(s,e){ return s+e.amt; }, 0);
+      grandTotal += subtotal;
+      if(!entries.length) return '';
+      var rows = entries.map(function(e){
+        return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--line);">' +
+          '<span>' + esc(e.label) + '</span><span>' + fmt(e.amt) + '</span></div>';
+      }).join('');
+      return '<div style="margin-bottom:10px;">' +
+        '<div style="display:flex; justify-content:space-between; font-weight:700; margin-bottom:2px;"><span>' + methodLabel[key] + '</span><span>' + fmt(subtotal) + '</span></div>' +
+        rows +
+      '</div>';
+    }).join('');
+    document.getElementById('paymentBreakdownTotal').textContent = fmt(grandTotal);
+    wrap.innerHTML = sections || '<div class="empty-note">No sales in this range yet.</div>';
+  }
+
   function renderDashboard(){
     var today = todayStr();
     var sel = document.getElementById('dashRange');
@@ -2478,6 +2564,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       rangeLabel = fmtDate(dashRangeValue);
     }
     var rangeOrders = data.orders.filter(function(o){ return inRange(o.date); });
+    renderPaymentBreakdown(rangeOrders);
     var revenue = rangeOrders.reduce(function(s,o){ return s + o.qty*o.price; }, 0);
     var cost = rangeOrders.reduce(function(s,o){ return s + o.qty*(o.cost||0); }, 0);
     var profit = revenue - cost;
@@ -2536,11 +2623,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(o.orderId){
         var g = bucket.orderGroups[o.orderId];
         if(!g){
-          g = bucket.orderGroups[o.orderId] = {t:'order', orderId:o.orderId, orderName:o.orderName, lines:[], amt:0, id:o.id};
+          g = bucket.orderGroups[o.orderId] = {t:'order', orderId:o.orderId, orderName:o.orderName, lines:[], amt:0, id:o.id, paymentMethod:null};
           bucket.events.push(g);
         }
         g.lines.push(o);
         g.amt += o.qty*o.price;
+        if(o.paymentMethod) g.paymentMethod = o.paymentMethod;
         if(o.id > g.id) g.id = o.id;
       } else {
         bucket.events.push({t:'sale', label:o.item + ' x ' + o.qty, amt:o.qty*o.price, id:o.id});
@@ -2554,8 +2642,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
     function renderEventRow(ev){
       if(ev.t === 'order'){
+        var payTag = ev.paymentMethod ? (' <span class="count" style="margin-left:4px;">' + PAY_TAG[ev.paymentMethod] + '</span>') : '';
         return '<div class="item-row" data-toggle-order="' + ev.orderId + '" style="cursor:pointer;">' +
-            '<div class="main"><div class="t">Order ' + esc(ev.orderName) + '</div>' +
+            '<div class="main"><div class="t">Order ' + esc(ev.orderName) + payTag + '</div>' +
             '<div class="s">' + ev.lines.length + ' item' + (ev.lines.length===1?'':'s') + ' · tap to see 点击查看顾客买了什么</div></div>' +
             '<div class="right"><span class="amt good">' + fmt(ev.amt) + '</span></div></div>' +
           '<div class="order-detail" id="orderDetail_' + ev.orderId + '" style="display:none; padding:2px 0 10px 14px;">' +
