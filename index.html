@@ -107,7 +107,7 @@ body{
 .app{max-width:520px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--paper);}
 
 /* header */
-.zoom-controls{display:flex; align-items:center; gap:4px;}
+.zoom-controls{display:flex; align-items:center; gap:4px; flex:none;}
 .zoom-btn{
   border:1px solid var(--line); background:var(--paper-raised); color:var(--ink);
   border-radius:8px; width:30px; height:30px; font-family:'Public Sans', system-ui, sans-serif;
@@ -116,14 +116,14 @@ body{
 .zoom-btn:active{background:var(--accent-soft);}
 .zoom-btn.small{font-size:.72rem;}
 .zoom-btn.big{font-size:1.05rem;}
-.zoom-btn.test-toggle{width:auto; min-width:0; height:28px; padding:0 8px; white-space:nowrap;}
+.zoom-btn.test-toggle{width:auto; min-width:0; height:28px; padding:0 8px; white-space:nowrap; flex:none;}
 header.top{
   padding:20px 18px 14px; display:flex; align-items:baseline; justify-content:space-between;
   border-bottom:1px solid var(--line);
 }
 header.top h1{
   font-family:'Fraunces', serif; font-weight:600; font-size:1.5rem; margin:0;
-  letter-spacing:-0.01em;
+  letter-spacing:-0.01em; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 header.top .date{font-size:.8rem; color:var(--ink-soft); font-family:'IBM Plex Mono',monospace;}
 
@@ -818,25 +818,39 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function(){
       setCloudStatus('Saving to cloud… 正在同步…');
-      sb.from('app_state').upsert({id:1, data:realData, updated_at:new Date().toISOString()}).then(function(res){
+      var savedAt = realData.lastSavedAt || new Date().toISOString();
+      sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
         setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
       });
     }, 800);
   }
 
+  // Pulling from the cloud used to always overwrite local data, which could silently
+  // discard very recent changes if the last push hadn't finished before the app was
+  // closed/reloaded (the push is debounced by ~800ms). Now we compare timestamps —
+  // whichever copy (local or cloud) was actually saved more recently wins, and if
+  // local wins we re-push it so the cloud catches up instead of staying stale.
   function pullFromCloud(){
     if(!sb) return;
     setCloudStatus('Loading from cloud… 正在读取云端…');
-    sb.from('app_state').select('data').eq('id', 1).maybeSingle().then(function(res){
+    sb.from('app_state').select('data, updated_at').eq('id', 1).maybeSingle().then(function(res){
       if(res.error){ setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料'); return; }
       if(res.data && res.data.data){
-        realData = runMigrations(res.data.data);
-        try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(e){}
-        if(!testMode){
-          data = realData;
-          renderAll();
+        var cloudTime = res.data.updated_at ? new Date(res.data.updated_at).getTime() : 0;
+        var localTime = realData.lastSavedAt ? new Date(realData.lastSavedAt).getTime() : 0;
+        if(cloudTime > localTime){
+          realData = runMigrations(res.data.data);
+          try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(e){}
+          if(!testMode){
+            data = realData;
+            renderAll();
+          }
+          setCloudStatus('✓ Synced to cloud 已同步');
+        } else {
+          // local copy is newer (or equal) — keep it, and make sure the cloud catches up
+          setCloudStatus('✓ Synced to cloud 已同步');
+          pushToCloud();
         }
-        setCloudStatus('✓ Synced to cloud 已同步');
       } else {
         // no cloud copy yet — push what we have locally as the first cloud copy
         pushToCloud();
@@ -851,6 +865,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       try{ localStorage.setItem(TEST_STORE_KEY, JSON.stringify(data)); }catch(e){}
       return;
     }
+    data.lastSavedAt = new Date().toISOString();
     realData = data;
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
     pushToCloud();
@@ -1958,22 +1973,37 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderWasteItemSelect();
     var list = document.getElementById('wasteList');
     var today = todayStr();
-    var sorted = data.wastage.filter(function(w){ return w.date === today; })
-      .slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
-    document.getElementById('wasteCount').textContent = sorted.length;
-    if(!sorted.length){
-      list.innerHTML = '<div class="empty-note">No wastage logged today. Nice. 今天还没有损耗记录。</div>';
+    var all = data.wastage.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
+    document.getElementById('wasteCount').textContent = all.filter(function(w){ return w.date === today; }).length;
+    if(!all.length){
+      list.innerHTML = '<div class="empty-note">No wastage logged yet. Nice. 还没有损耗记录。</div>';
       return;
     }
-    list.innerHTML = sorted.map(function(w){
-      var loss = w.qty * (w.unitCost || 0);
-      var inv = w.itemId ? data.inventory.find(function(i){ return i.id === w.itemId; }) : null;
-      var displayName = inv ? label(inv) : w.item;
-      return '<div class="item-row">' +
-        '<div class="main"><div class="t">' + esc(displayName) + '</div>' +
-        '<div class="s">' + fmtDate(w.date) + ' · ' + w.qty + ' · ' + esc(w.reason) + '</div></div>' +
-        '<div class="right"><span class="amt bad">-' + fmt(loss) + '</span>' +
-        '<button class="del-btn" data-del-waste="' + w.id + '" title="Remove">✕</button></div></div>';
+    // group by date — today's list stays open, older days collapse into a tap-to-expand
+    // row so nothing is ever hidden or deleted, just tucked away to keep today tidy
+    var groups = {}; var dateOrder = [];
+    all.forEach(function(w){
+      if(!groups[w.date]){ groups[w.date] = []; dateOrder.push(w.date); }
+      groups[w.date].push(w);
+    });
+    list.innerHTML = dateOrder.map(function(date){
+      var entries = groups[date];
+      var totalLoss = entries.reduce(function(s, w){ return s + w.qty * (w.unitCost || 0); }, 0);
+      var isToday = date === today;
+      var rowsHtml = entries.map(function(w){
+        var loss = w.qty * (w.unitCost || 0);
+        var inv = w.itemId ? data.inventory.find(function(i){ return i.id === w.itemId; }) : null;
+        var displayName = inv ? label(inv) : w.item;
+        return '<div class="item-row">' +
+          '<div class="main"><div class="t">' + esc(displayName) + '</div>' +
+          '<div class="s">' + w.qty + ' · ' + esc(w.reason) + '</div></div>' +
+          '<div class="right"><span class="amt bad">-' + fmt(loss) + '</span>' +
+          '<button class="del-btn" data-del-waste="' + w.id + '" title="Remove">✕</button></div></div>';
+      }).join('');
+      return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
+        '<summary>' + fmtDate(date) + (isToday ? ' · Today 今天' : '') + ' — ' + entries.length + ' · -' + fmt(totalLoss) + '</summary>' +
+        '<div style="padding:0 16px 12px;">' + rowsHtml + '</div>' +
+      '</details>';
     }).join('');
   }
 
@@ -2066,8 +2096,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     tile.classList.toggle('negative', profit < 0);
     document.getElementById('profitSub').textContent = rangeOrders.length + ' sale' + (rangeOrders.length===1?'':'s') + ' logged';
 
-    var todaysOrders = data.orders.filter(function(o){ return o.date === today; });
-
     var wasteTotal = data.wastage.filter(function(w){ return inRange(w.date); })
       .reduce(function(s,w){ return s + w.qty*(w.unitCost||0); }, 0);
     document.getElementById('sumWaste').textContent = fmt(wasteTotal);
@@ -2084,26 +2112,37 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         '<span class="qty">' + total.toFixed(total % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left (stall + warehouse, reorder at ' + i.reorder + ')</span></div>';
     }).join('') : '<div class="empty-note">Everything is stocked above its reorder point.</div>';
 
-    var events = [];
-    var orderGroups = {};
-    todaysOrders.forEach(function(o){
+    // Recent activity — grouped by date across ALL history (not just today), so nothing
+    // is ever hidden. Today's group is shown open; older days collapse into a
+    // tap-to-expand row, same as Wastage.
+    var eventsByDate = {};
+    var dateOrder = [];
+    function ensureDateBucket(dt){
+      if(!eventsByDate[dt]){ eventsByDate[dt] = { orderGroups: {}, events: [] }; dateOrder.push(dt); }
+      return eventsByDate[dt];
+    }
+    data.orders.forEach(function(o){
+      var bucket = ensureDateBucket(o.date);
       if(o.orderId){
-        var g = orderGroups[o.orderId];
+        var g = bucket.orderGroups[o.orderId];
         if(!g){
-          g = orderGroups[o.orderId] = {t:'order', orderId:o.orderId, orderName:o.orderName, lines:[], amt:0, id:o.id};
-          events.push(g);
+          g = bucket.orderGroups[o.orderId] = {t:'order', orderId:o.orderId, orderName:o.orderName, lines:[], amt:0, id:o.id};
+          bucket.events.push(g);
         }
         g.lines.push(o);
         g.amt += o.qty*o.price;
         if(o.id > g.id) g.id = o.id;
       } else {
-        events.push({t:'sale', label:o.item + ' × ' + o.qty, amt:o.qty*o.price, id:o.id});
+        bucket.events.push({t:'sale', label:o.item + ' x ' + o.qty, amt:o.qty*o.price, id:o.id});
       }
     });
-    data.wastage.filter(function(w){ return w.date === today; }).forEach(function(w){ events.push({t:'waste', label:w.item + ' wasted', amt:-(w.qty*(w.unitCost||0)), id:w.id}); });
-    events.sort(function(a,b){ return b.id.localeCompare(a.id); });
-    var recEl = document.getElementById('recentList');
-    recEl.innerHTML = events.length ? events.slice(0,8).map(function(ev){
+    data.wastage.forEach(function(w){
+      var bucket = ensureDateBucket(w.date);
+      bucket.events.push({t:'waste', label:w.item + ' wasted', amt:-(w.qty*(w.unitCost||0)), id:w.id});
+    });
+    dateOrder.sort(function(a,b){ return b.localeCompare(a); });
+
+    function renderEventRow(ev){
       if(ev.t === 'order'){
         return '<div class="item-row" data-toggle-order="' + ev.orderId + '" style="cursor:pointer;">' +
             '<div class="main"><div class="t">Order ' + esc(ev.orderName) + '</div>' +
@@ -2111,14 +2150,27 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
             '<div class="right"><span class="amt good">' + fmt(ev.amt) + '</span></div></div>' +
           '<div class="order-detail" id="orderDetail_' + ev.orderId + '" style="display:none; padding:2px 0 10px 14px;">' +
             ev.lines.map(function(l){
-              return '<div class="s" style="padding:3px 0;">' + esc(l.item) + ' × ' + l.qty + ' — ' + fmt(l.qty*l.price) + '</div>';
+              return '<div class="s" style="padding:3px 0;">' + esc(l.item) + ' x ' + l.qty + ' - ' + fmt(l.qty*l.price) + '</div>';
             }).join('') +
           '</div>';
       }
       return '<div class="item-row"><div class="main"><div class="t">' + esc(ev.label) + '</div>' +
         '<div class="s">' + (ev.t==='sale' ? 'Order logged' : 'Wastage logged') + '</div></div>' +
         '<div class="right"><span class="amt ' + (ev.amt>=0?'good':'bad') + '">' + (ev.amt>=0?'':'-') + fmt(Math.abs(ev.amt)) + '</span></div></div>';
-    }).join('') : '<div class="empty-note">No activity yet today — log a sale or restock to get started.</div>';
+    }
+
+    var recEl = document.getElementById('recentList');
+    recEl.innerHTML = dateOrder.length ? dateOrder.map(function(dt){
+      var bucket = eventsByDate[dt];
+      var evts = bucket.events.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
+      var dayTotal = evts.reduce(function(s, ev){ return s + ev.amt; }, 0);
+      var isToday = dt === today;
+      var rowsHtml = evts.map(renderEventRow).join('');
+      return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
+        '<summary>' + fmtDate(dt) + (isToday ? ' · Today 今天' : '') + ' — ' + evts.length + ' · ' + (dayTotal>=0?'':'-') + fmt(Math.abs(dayTotal)) + '</summary>' +
+        '<div style="padding:0 16px 12px;">' + rowsHtml + '</div>' +
+      '</details>';
+    }).join('') : '<div class="empty-note">No activity yet — log a sale or restock to get started.</div>';
   }
 
   document.getElementById('recentList').addEventListener('click', function(e){
