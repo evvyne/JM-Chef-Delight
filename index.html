@@ -1085,11 +1085,27 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
           '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
 
-          '<div class="field"><label for="invEditQty">Qty at stall (' + esc(item.unit) + ', for a manual correction)</label><input class="big-input" id="invEditQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.qty + '"></div>' +
+          '<div class="section-title" style="font-size:.85rem; margin:0;">🚚 Bring to stall 带去摊位 — 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' in warehouse</div>' +
+          '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
+            [5,10,20,30,50].map(function(n){ return '<button class="qty-btn" style="font-size:1rem; padding:12px 2px;" data-bring="' + n + '">+' + n + '</button>'; }).join('') +
+          '</div>' +
+          '<div class="row2">' +
+            '<input class="big-input" id="bringCustom" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 8">' +
+            '<button class="btn-ghost" type="button" id="bringCustomGo">Bring out 带出去</button>' +
+          '</div>' +
+          '<div class="muted-small" style="margin:0;">This always ADDS what you type to the stall, and takes the same amount out of the warehouse. 这个一定是「+你打的数字」带去摊位，仓库会自动扣一样的数量。</div>' +
+
+          '<details class="manual-entry" style="box-shadow:none; margin-top:6px;">' +
+            '<summary>Fix a wrong number 打错字/对不上才用</summary>' +
+            '<div style="padding:0 16px 16px; display:flex; flex-direction:column; gap:10px;">' +
+              '<div class="muted-small" style="margin:0;">Only use this to correct a typo — it sets the stall count directly and does NOT move anything from the warehouse. 只用来改错字，会直接改摊位数字，不会跟仓库有任何进出。</div>' +
+              '<div class="field"><label for="invEditQty">Qty at stall (' + esc(item.unit) + ')</label><input class="big-input" id="invEditQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.qty + '"></div>' +
+              '<button class="btn-ghost" type="button" id="modalInvSave" style="width:100%;">Save correction 保存更正</button>' +
+            '</div>' +
+          '</details>' +
 
           '<div class="modal-actions">' +
-            '<button class="btn-ghost" type="button" id="modalCancel">Cancel</button>' +
-            '<button class="primary" type="button" id="modalInvSave">Save</button>' +
+            '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Close</button>' +
           '</div>' +
 
           '<div class="section-title" style="font-size:.85rem; margin:2px 0 0;">Packing up? Return unsold 收摊?退回仓库</div>' +
@@ -1101,7 +1117,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
                '</div>')
             : '<div class="empty-note">Nothing left at the stall to return.</div>') +
 
-          '<div class="muted-small">Need to bring more stock to the stall, buy from a supplier, or change price/cost/category? Do that from the Warehouse tab. 需要补货、进货，或换价钱/成本/分类，去 Warehouse 分页。</div>' +
+          '<div class="muted-small">Need to buy from a supplier, or change price/cost/category? Do that from the Warehouse tab. 需要进货，或换价钱/成本/分类，去 Warehouse 分页。</div>' +
 
           '<button class="btn-ghost" type="button" id="modalCloseToDash" style="width:100%; margin-top:6px;">✕ Close 关闭</button>' +
         '</div>' +
@@ -1109,6 +1125,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     document.getElementById('modalCloseToDash').addEventListener('click', function(){
       closeModal();
       goToView(returnView);
+    });
+    root.querySelectorAll('[data-bring]').forEach(function(btn){
+      btn.addEventListener('click', function(){ bringToStall(item, parseInt(btn.dataset.bring, 10)); });
+    });
+    document.getElementById('bringCustomGo').addEventListener('click', function(){
+      var n = parseInt(document.getElementById('bringCustom').value, 10);
+      if(!n || n < 1){ document.getElementById('bringCustom').focus(); return; }
+      bringToStall(item, n);
     });
     if(item.qty > 0){
       document.getElementById('returnAllBtn').addEventListener('click', function(){
@@ -1123,32 +1147,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     document.getElementById('modalInvSave').addEventListener('click', function(){
       var qty = parseFloat(document.getElementById('invEditQty').value);
       if(isNaN(qty) || qty < 0){ return; }
-      var diff = qty - item.qty;
-      if(diff > 0){
-        // taking more out to the stall — pull the difference from the warehouse (never below 0)
-        var moved = Math.min(diff, item.warehouseQty);
-        item.warehouseQty -= moved;
-        item.qty += moved;
-        if(moved > 0){
-          data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:moved, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'bring'});
-        }
-        if(moved < diff){
-          flash('Only ' + moved + ' ' + item.unit + ' were in the warehouse — set stall qty to ' + item.qty + ' instead of ' + qty);
-        } else {
-          flash('✓ ' + item.nameEn + ' saved — ' + moved + ' moved out of warehouse');
-        }
-      } else if(diff < 0){
-        // correcting downward (typo, or putting stock back) — return the difference to the warehouse
-        var back = -diff;
-        item.qty -= back;
-        item.warehouseQty += back;
-        data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:back, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'return'});
-        flash('✓ ' + item.nameEn + ' saved — ' + back + ' moved back to warehouse');
-      } else {
-        flash('✓ ' + item.nameEn + ' saved');
-      }
+      // this is a pure correction — it only fixes the displayed stall number, and
+      // deliberately does NOT touch the warehouse (bringing/returning stock has its
+      // own buttons above, which do the warehouse math)
+      item.qty = qty;
       save();
       renderAll();
+      flash('✓ Stall qty corrected to ' + qty + ' ' + item.unit);
       // refresh the modal in place so you can immediately correct a mistake without leaving the page
       openInvEditModal(item.id);
     });
@@ -1178,6 +1183,24 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     closeModal();
     renderAll();
     flash('✓ Returned ' + item.nameEn + ' ' + moved + ' to warehouse');
+  }
+
+  // Always a delta: adds exactly `qty` to the stall and takes exactly `qty` out of the
+  // warehouse (capped at what's actually there) — this is the one and only way stock
+  // should move from warehouse to stall, so it can never be confused with a correction.
+  function bringToStall(item, qty){
+    var moved = Math.min(qty, item.warehouseQty);
+    if(moved <= 0){ flash('Warehouse is empty for ' + item.nameEn); return; }
+    item.warehouseQty -= moved;
+    item.qty += moved;
+    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:moved, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'bring'});
+    save();
+    renderAll();
+    flash(moved < qty
+      ? ('Only ' + moved + ' ' + item.unit + ' were in the warehouse — brought all of it to the stall')
+      : ('✓ Brought ' + item.nameEn + ' +' + moved + ' to the stall'));
+    // refresh the modal in place so you can keep bringing out more items without leaving the page
+    openInvEditModal(item.id);
   }
 
   function renderWarehouseGrid(){
@@ -1242,7 +1265,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
             '<button class="btn-ghost" type="button" id="buyCustomGo">Add to warehouse</button>' +
           '</div>' +
 
-          '<div class="muted-small" style="margin:4px 0 0;">To bring stock out to the stall, go to the Stall tab and edit the qty at stall there — it will move out of the warehouse automatically. 要把货带去摊位，去 Stall 分页改摊位数量，会自动从仓库扣除。</div>' +
+          '<div class="muted-small" style="margin:4px 0 0;">To bring stock out to the stall, go to the Stall tab and tap "🚚 Bring to stall" on this item. 要把货带去摊位，去 Stall 分页点这个品项的「🚚 带去摊位」。</div>' +
 
           '<div class="modal-actions">' +
             '<button class="btn-ghost" type="button" id="modalCancel" style="flex:none; width:100%;">Close</button>' +
