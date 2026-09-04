@@ -544,13 +544,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         </div>
         <div class="field"><label for="wasteReason">Reason 原因</label>
           <select id="wasteReason">
-            <option>Expired</option>
-            <option>Spoiled</option>
-            <option>Prep error</option>
-            <option>Dropped/damaged</option>
-            <option>Other</option>
+            <option value="Expired">Expired 过期</option>
+            <option value="Spoiled">Spoiled 坏了</option>
+            <option value="Prep error">Prep error 准备出错</option>
+            <option value="Dropped/damaged">Dropped/damaged 掉了/损坏</option>
+            <option value="Free for customer">Free for customer 请顾客</option>
+            <option value="Other">Other 其他</option>
           </select>
         </div>
+        <div class="field" id="wasteOtherWrap" hidden><label for="wasteOtherText">Say more (optional) 补充说明（可不填）</label><input id="wasteOtherText" placeholder="e.g. dropped by staff"></div>
         <button class="primary" type="submit">Log wastage 记录损耗</button>
       </form>
 
@@ -2104,11 +2106,19 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }).join('');
   }
 
+  document.getElementById('wasteReason').addEventListener('change', function(){
+    document.getElementById('wasteOtherWrap').hidden = (this.value !== 'Other');
+  });
+
   document.getElementById('wasteForm').addEventListener('submit', function(e){
     e.preventDefault();
     var itemId = document.getElementById('wasteItem').value;
     var qty = parseFloat(document.getElementById('wasteQty').value);
     var reason = document.getElementById('wasteReason').value;
+    if(reason === 'Other'){
+      var otherText = document.getElementById('wasteOtherText').value.trim();
+      if(otherText) reason = otherText;
+    }
     var inv = data.inventory.find(function(i){ return i.id === itemId; });
     if(!inv || isNaN(qty)) return;
     var unitCost = inv.unitCost || 0;
@@ -2116,6 +2126,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     data.wastage.push({id:uid('w'), date:todayStr(), item:label(inv), itemId:inv.id, qty:qty, unitCost:unitCost, reason:reason});
     save();
     this.reset();
+    document.getElementById('wasteOtherWrap').hidden = true;
     renderAll();
     flash('✓ Logged wastage — ' + qty + ' ' + inv.unit + ' deducted from stall stock');
   });
