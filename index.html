@@ -400,8 +400,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       <div class="summary-grid">
         <div class="tile"><div class="label" id="revenueLabel">Revenue today 今日营收</div><div class="value" id="sumRevenue">—</div></div>
         <div class="tile"><div class="label" id="costLabel">Cost today 今日成本</div><div class="value" id="sumCost">—</div></div>
-        <div class="tile profit wide" id="profitTile"><div class="label" id="profitLabel">Profit today 今日利润</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
+        <div class="tile profit" id="profitTile"><div class="label" id="profitLabel">Gross profit today 今日毛利</div><div class="value" id="sumProfit">—</div><div class="sub" id="profitSub"></div></div>
         <div class="tile"><div class="label" id="wasteLabel">Waste today 今日损耗</div><div class="value" id="sumWaste">—</div></div>
+        <div class="tile profit wide" id="netProfitTile"><div class="label" id="netProfitLabel">Net profit today 今日净利</div><div class="value" id="sumNetProfit">—</div><div class="sub">Gross profit − waste 毛利减损耗</div></div>
         <div class="tile"><div class="label">Stock value 库存价值</div><div class="value" id="sumStockValue">—</div></div>
       </div>
 
@@ -484,6 +485,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <div class="section-title" style="margin-bottom:8px;">Adding to 加入到<button class="btn-ghost" type="button" id="undoOrderBtn" style="padding:6px 10px; font-size:.72rem;">↩ Undo last</button></div>
         <div class="order-chip-row" id="orderChipRow"></div>
       </div>
+
+      <details class="manual-entry" style="box-shadow:none;">
+        <summary>📦 What's left today 今天剩下多少<span class="count" id="stockLeftCount">0</span></summary>
+        <div id="stockLeftList" style="padding:0 16px 16px; display:flex; flex-direction:column; gap:2px;"></div>
+      </details>
 
       <div>
         <div class="section-title" style="margin-bottom:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">Tap to sell 点击售出
@@ -918,6 +924,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   ];
   var sortMode = localStorage.getItem(SORT_KEY) || 'alpha';
   var reorderMode = false;
+  var expandedStallItems = {}; // itemId -> true when its "sold today" panel is expanded on the Stall tab
   function syncItemOrder(){
     var ids = data.inventory.map(function(i){ return i.id; });
     var order = (data.itemOrder || []).filter(function(id){ return ids.indexOf(id) !== -1; });
@@ -960,6 +967,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderInventoryGrid();
     renderWarehouseGrid();
     renderQuickGrid();
+    renderStockLeftList();
   }
   function moveArrowsHtml(itemId, idx, items){
     var upDisabled = idx === 0 ? ' disabled' : '';
@@ -979,6 +987,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderInventoryGrid();
     renderWarehouseGrid();
     renderQuickGrid();
+    renderStockLeftList();
   }
   ['tileSortMode1','tileSortMode2','tileSortMode3'].forEach(function(id){
     var el = document.getElementById(id);
@@ -997,6 +1006,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderInventoryGrid();
     renderWarehouseGrid();
     renderQuickGrid();
+    renderStockLeftList();
   }
   ['reorderBtn1','reorderBtn2','reorderBtn3'].forEach(function(id){
     var el = document.getElementById(id);
@@ -1046,12 +1056,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var low = i.reorder != null && (i.qty + i.warehouseQty) <= i.reorder;
         var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
-        return '<div class="quick-tile" data-inv-item="' + i.id + '">' +
+        var expanded = !!expandedStallItems[i.id];
+        return '<div class="quick-tile' + (expanded ? ' expanded' : '') + '" data-inv-item="' + i.id + '" style="cursor:pointer;">' +
+          (reorderMode ? '' : '<button class="qt-edit" data-edit-item="' + i.id + '" title="Edit 编辑">✎</button>') +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
           '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
           '<div class="qt-stock' + (low ? ' low' : '') + '">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' at stall' + (low ? ' · low!' : '') + '</div>' +
-          '<div class="qt-stock">🏬 ' + i.warehouseQty.toFixed(i.warehouseQty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' in warehouse</div>' +
+          '<div class="qt-stock" style="margin-top:2px;">' + (expanded ? '▲ Hide sold today 收起' : '▼ Sold today 今天卖了') + '</div>' +
           (reorderMode ? moveArrowsHtml(i.id, idx, items) : '') +
+          (expanded ? ('<div style="margin-top:6px; cursor:default;" onclick="event.stopPropagation();">' + soldTodayHtml(i) + '</div>') : '') +
           '</div>';
       }).join('') + '</div>';
     });
@@ -1069,10 +1082,41 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return;
     }
     if(reorderMode) return;
+    var editBtn = e.target.closest('[data-edit-item]');
+    if(editBtn){
+      openInvEditModal(editBtn.dataset.editItem);
+      return;
+    }
     var tile = e.target.closest('[data-inv-item]');
     if(!tile) return;
-    openInvEditModal(tile.dataset.invItem);
+    var id = tile.dataset.invItem;
+    expandedStallItems[id] = !expandedStallItems[id];
+    renderInventoryGrid();
   });
+
+  // Builds the "Sold today" summary block shown inside an item's modal — total qty and
+  // revenue sold today, plus a per-order breakdown so you can see exactly when it sold.
+  function soldTodayHtml(item){
+    var today = todayStr();
+    var name = label(item);
+    var sales = data.orders.filter(function(o){ return o.date === today && o.item === name; });
+    if(!sales.length){
+      return '<div class="section-title" style="font-size:.85rem; margin:2px 0 0;">📊 Sold today 今天卖了</div>' +
+        '<div class="empty-note" style="margin:0 0 4px;">Nothing sold yet today. 今天还没卖出。</div>';
+    }
+    var totalQty = sales.reduce(function(s,o){ return s + o.qty; }, 0);
+    var totalRevenue = sales.reduce(function(s,o){ return s + o.qty * o.price; }, 0);
+    sales.sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+    var rows = sales.map(function(o){
+      var t = o.time ? new Date(o.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+      return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--border);">' +
+        '<span>' + t + (o.orderName ? ' · Order ' + esc(o.orderName) : '') + '</span>' +
+        '<span>×' + o.qty + ' · ' + fmt(o.qty * o.price) + '</span>' +
+      '</div>';
+    }).join('');
+    return '<div class="section-title" style="font-size:.85rem; margin:2px 0 0;">📊 Sold today 今天卖了 — ' + totalQty + ' ' + esc(item.unit) + ' · ' + fmt(totalRevenue) + '</div>' +
+      '<div style="margin:0 0 4px;">' + rows + '</div>';
+  }
 
   function openInvEditModal(itemId){
     var item = data.inventory.find(function(i){ return i.id === itemId; });
@@ -1468,6 +1512,35 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     flashTimer = setTimeout(function(){ el.classList.remove('show'); }, 1600);
   }
 
+  // Read-only "what's left" list shown as a dropdown on the Orders tab, so you can glance
+  // at today's remaining stall stock (and show a customer) without tapping into an item.
+  // Sold-out items show a crossed-out "Sold out" tag instead of "0" so it reads clearly.
+  function renderStockLeftList(){
+    var wrap = document.getElementById('stockLeftList');
+    if(!wrap) return;
+    document.getElementById('stockLeftCount').textContent = data.inventory.length;
+    if(!data.inventory.length){
+      wrap.innerHTML = '<div class="empty-note">No items yet.</div>';
+      return;
+    }
+    var html = '';
+    CATEGORIES.forEach(function(cat){
+      var items = sortItems(data.inventory.filter(function(i){ return i.category === cat; }));
+      if(!items.length) return;
+      html += '<div class="cat-header" style="margin-top:6px;">' + CAT_LABEL[cat] + '</div>';
+      items.forEach(function(i){
+        var soldOut = i.qty <= 0;
+        html += '<div style="display:flex; justify-content:space-between; align-items:center; font-size:.85rem; padding:5px 0; border-bottom:1px solid var(--border);">' +
+          '<span' + (soldOut ? ' style="text-decoration:line-through; color:var(--ink-soft);"' : '') + '>' + esc(i.nameEn) + (i.nameZh ? ' ' + esc(i.nameZh) : '') + '</span>' +
+          (soldOut
+            ? '<span style="color:var(--bad); font-weight:600;">Sold out 卖完了</span>'
+            : '<span>' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' left</span>') +
+        '</div>';
+      });
+    });
+    wrap.innerHTML = html;
+  }
+
   function renderQuickGrid(){
     var grid = document.getElementById('quickGrid');
     if(!data.inventory.length){
@@ -1588,6 +1661,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(editOnly){
         closeModal();
         renderQuickGrid();
+    renderStockLeftList();
         flash('✓ Price saved');
       } else {
         openQtyModal(item.id);
@@ -2109,8 +2183,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
     document.getElementById('revenueLabel').textContent = (dashRangeValue==='all' ? 'Total revenue 总营收' : dashRangeValue==='today' ? 'Revenue today 今日营收' : dashRangeValue==='month' ? 'Revenue this month 本月营收' : 'Revenue ' + rangeLabel);
     document.getElementById('costLabel').textContent = (dashRangeValue==='all' ? 'Total cost 总成本' : dashRangeValue==='today' ? 'Cost today 今日成本' : dashRangeValue==='month' ? 'Cost this month 本月成本' : 'Cost ' + rangeLabel);
-    document.getElementById('profitLabel').textContent = (dashRangeValue==='all' ? 'Total profit 总利润' : dashRangeValue==='today' ? 'Profit today 今日利润' : dashRangeValue==='month' ? 'Profit this month 本月利润' : 'Profit ' + rangeLabel);
+    document.getElementById('profitLabel').textContent = (dashRangeValue==='all' ? 'Total gross profit 总毛利' : dashRangeValue==='today' ? 'Gross profit today 今日毛利' : dashRangeValue==='month' ? 'Gross profit this month 本月毛利' : 'Gross profit ' + rangeLabel);
     document.getElementById('wasteLabel').textContent = (dashRangeValue==='all' ? 'Total waste 总损耗' : dashRangeValue==='today' ? 'Waste today 今日损耗' : dashRangeValue==='month' ? 'Waste this month 本月损耗' : 'Waste ' + rangeLabel);
+    document.getElementById('netProfitLabel').textContent = (dashRangeValue==='all' ? 'Total net profit 总净利' : dashRangeValue==='today' ? 'Net profit today 今日净利' : dashRangeValue==='month' ? 'Net profit this month 本月净利' : 'Net profit ' + rangeLabel);
 
     document.getElementById('sumRevenue').textContent = fmt(revenue);
     document.getElementById('sumCost').textContent = fmt(cost);
@@ -2122,6 +2197,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var wasteTotal = data.wastage.filter(function(w){ return inRange(w.date); })
       .reduce(function(s,w){ return s + w.qty*(w.unitCost||0); }, 0);
     document.getElementById('sumWaste').textContent = fmt(wasteTotal);
+
+    // Net profit = Gross profit (revenue minus cost of items sold) minus the cost of
+    // whatever was wasted in this same range — the standard way to account for
+    // spoilage/loss as a real cost against your actual take-home profit.
+    var netProfit = profit - wasteTotal;
+    document.getElementById('sumNetProfit').textContent = fmt(netProfit);
+    document.getElementById('netProfitTile').classList.toggle('negative', netProfit < 0);
 
     var stockValue = data.inventory.reduce(function(s,i){ return s + i.qty*i.unitCost; }, 0);
     document.getElementById('sumStockValue').textContent = fmt(stockValue);
@@ -2269,6 +2351,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderMenuDatalist();
     renderItemLookup();
     renderQuickGrid();
+    renderStockLeftList();
     renderOrderChips();
     renderTicket();
     renderRestockHistory();
