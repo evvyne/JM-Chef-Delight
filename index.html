@@ -369,10 +369,18 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     <div class="zoom-controls">
       <button class="zoom-btn small" type="button" id="zoomOutBtn" title="Smaller text 缩小字体">A</button>
       <button class="zoom-btn big" type="button" id="zoomInBtn" title="Bigger text 放大字体">A</button>
+      <button class="zoom-btn small" type="button" id="testModeToggle" title="Testing mode — practice without affecting real records 测试模式" style="font-size:1rem;">🧪</button>
     </div>
     <span class="date" id="todayLabel"></span>
   </header>
   <div class="muted-small" id="cloudSyncStatus" style="text-align:center; padding:4px 16px 0;"></div>
+  <div id="testModeBanner" hidden style="background:var(--bad); color:#fff; padding:8px 14px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:.78rem; font-weight:600;">
+    <span>🧪 TESTING MODE — practice data, nothing here counts 测试模式，不算入真实记录</span>
+    <span style="display:flex; gap:6px;">
+      <button type="button" id="testModeReset" style="background:rgba(255,255,255,.2); color:#fff; border:1px solid rgba(255,255,255,.5); border-radius:8px; padding:5px 10px; font-size:.72rem; font-weight:700;">↻ Reset 重置</button>
+      <button type="button" id="testModeExit" style="background:rgba(255,255,255,.2); color:#fff; border:1px solid rgba(255,255,255,.5); border-radius:8px; padding:5px 10px; font-size:.72rem; font-weight:700;">✕ Exit 退出</button>
+    </span>
+  </div>
 
   <main>
     <!-- DASHBOARD -->
@@ -709,12 +717,82 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return d;
   }
 
-  var data;
+  var TEST_STORE_KEY = "truckledger_v1_test";
+  var testMode = false;
+  var realData;
   try{
     var raw = localStorage.getItem(STORE_KEY);
-    data = raw ? JSON.parse(raw) : seedData();
-  }catch(e){ data = seedData(); }
-  data = runMigrations(data);
+    realData = raw ? JSON.parse(raw) : seedData();
+  }catch(e){ realData = seedData(); }
+  realData = runMigrations(realData);
+  var data = realData;
+
+  // ---- testing mode: a fully separate practice dataset, so parents can be trained
+  // over and over without ever touching real orders/stock/history. Nothing done here
+  // is saved to the cloud or counted in real totals. ----
+  function makeTestData(){
+    var invSource = (realData && realData.inventory && realData.inventory.length) ? realData.inventory : seedData().inventory;
+    var invClone = invSource.map(function(i){
+      return mkInv(i.id, i.nameEn, i.nameZh, i.category, i.unit, 10, i.unitCost || 0, i.sellPrice, i.reorder, 20);
+    });
+    return {
+      inventory: invClone,
+      orders: [],
+      wastage: [],
+      restocks: [],
+      openOrders: [],
+      orderCounter: 0,
+      activeOrderId: null,
+      defaultsSeeded: true,
+      lastStallResetDate: todayStr()
+    };
+  }
+  function updateTestBanner(){
+    var banner = document.getElementById('testModeBanner');
+    var toggleBtn = document.getElementById('testModeToggle');
+    if(banner) banner.hidden = !testMode;
+    if(toggleBtn){
+      toggleBtn.style.background = testMode ? 'var(--bad)' : '';
+      toggleBtn.style.color = testMode ? '#fff' : '';
+    }
+    document.body.style.paddingTop = '';
+  }
+  function enterTestMode(){
+    if(testMode) return;
+    testMode = true;
+    var testD = null;
+    try{
+      var rawTest = localStorage.getItem(TEST_STORE_KEY);
+      if(rawTest) testD = JSON.parse(rawTest);
+    }catch(e){ testD = null; }
+    if(!testD) testD = makeTestData();
+    testD = runMigrations(testD);
+    data = testD;
+    try{ localStorage.setItem(TEST_STORE_KEY, JSON.stringify(data)); }catch(e){}
+    updateTestBanner();
+    renderAll();
+    flash('🧪 Testing mode on — nothing here is real 测试模式开启');
+  }
+  function exitTestMode(){
+    if(!testMode) return;
+    testMode = false;
+    data = realData;
+    updateTestBanner();
+    renderAll();
+    flash('✓ Back to real data 已回到真实资料');
+  }
+  function resetTestData(){
+    if(!confirm('Reset practice data to a fresh copy? Everything typed in testing mode will be cleared — your real records are never touched.\n\n重置练习资料？测试模式里打的东西会被清除，不会影响真实记录。')) return;
+    data = makeTestData();
+    try{ localStorage.setItem(TEST_STORE_KEY, JSON.stringify(data)); }catch(e){}
+    renderAll();
+    flash('✓ Practice data reset 练习资料已重置');
+  }
+  document.getElementById('testModeToggle').addEventListener('click', function(){
+    if(testMode){ exitTestMode(); } else { enterTestMode(); }
+  });
+  document.getElementById('testModeExit').addEventListener('click', exitTestMode);
+  document.getElementById('testModeReset').addEventListener('click', resetTestData);
 
   // ---- cloud sync (Supabase) — keeps a copy in the cloud so nothing is lost if this
   // device's browser storage gets cleared. Local storage is still used for instant
@@ -733,11 +811,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   var pushTimer = null;
   function pushToCloud(){
-    if(!sb) return;
+    if(!sb || testMode) return;
     clearTimeout(pushTimer);
     pushTimer = setTimeout(function(){
       setCloudStatus('Saving to cloud… 正在同步…');
-      sb.from('app_state').upsert({id:1, data:data, updated_at:new Date().toISOString()}).then(function(res){
+      sb.from('app_state').upsert({id:1, data:realData, updated_at:new Date().toISOString()}).then(function(res){
         setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
       });
     }, 800);
@@ -749,9 +827,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     sb.from('app_state').select('data').eq('id', 1).maybeSingle().then(function(res){
       if(res.error){ setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料'); return; }
       if(res.data && res.data.data){
-        data = runMigrations(res.data.data);
-        try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
-        renderAll();
+        realData = runMigrations(res.data.data);
+        try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(e){}
+        if(!testMode){
+          data = realData;
+          renderAll();
+        }
         setCloudStatus('✓ Synced to cloud 已同步');
       } else {
         // no cloud copy yet — push what we have locally as the first cloud copy
@@ -763,6 +844,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   var save = function(){
+    if(testMode){
+      try{ localStorage.setItem(TEST_STORE_KEY, JSON.stringify(data)); }catch(e){}
+      return;
+    }
+    realData = data;
     try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
     pushToCloud();
   };
@@ -1585,7 +1671,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="section-title" style="font-size:.95rem; margin-bottom:0;">Order ' + esc(order.name) + '</div>' +
           '<div style="font-family:\'IBM Plex Mono\',monospace; font-size:1.15rem; font-weight:700; color:var(--good, #16a34a);">' + fmt(orderTotal(order)) + '</div>' +
         '</div>' +
-        '<div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:8px;">' +
+        '<div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">' +
+          '<button class="btn-ghost" type="button" data-cash-calc="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">💵 Calculate change</button>' +
           (pending ? '<span class="count">' + pending + ' pending</span>' : '<button class="btn-ghost" type="button" data-close-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">✓ Close order</button>') +
           '<button class="btn-danger" type="button" data-delete-order="' + order.id + '" style="padding:5px 10px; font-size:.72rem;">🗑 Delete order</button>' +
         '</div>' +
@@ -1643,14 +1730,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
   }
 
-  function openCashChangeModal(order){
+  function openCashChangeModal(order, standalone){
     var total = orderTotal(order);
     var root = document.getElementById('quickModalRoot');
     root.innerHTML =
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
-          '<div class="modal-title">💵 Cash — Order ' + esc(order.name) + '</div>' +
-          '<div class="modal-sub">Total 总额: ' + fmt(total) + '</div>' +
+          '<div class="modal-title">💵 ' + (standalone ? 'Cash calculator' : 'Cash') + ' — Order ' + esc(order.name) + '</div>' +
+          '<div class="modal-sub">Total 总额: ' + fmt(total) + (standalone ? ' · you can do this anytime, even before the order is closed 什么时候都可以算，不一定要等结单' : '') + '</div>' +
           '<div class="field"><label for="cashReceived">Amount received 顾客给了多少</label>' +
             '<input class="big-input" id="cashReceived" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. 50" autofocus></div>' +
           '<div class="qty-grid" style="grid-template-columns:repeat(3,1fr);">' +
@@ -1662,8 +1749,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '</div>' +
           '<div class="modal-sub" id="cashChangeResult" style="font-size:1.15rem; font-weight:600; margin-top:4px;"></div>' +
           '<div class="modal-actions">' +
-            '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Back</button>' +
-            '<button class="primary" type="button" id="cashConfirm" style="width:100%;">✓ Done, close order</button>' +
+            '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">' + (standalone ? 'Close' : 'Back') + '</button>' +
+            (standalone ? '' : '<button class="primary" type="button" id="cashConfirm" style="width:100%;">✓ Done, close order</button>') +
           '</div>' +
         '</div>' +
       '</div>';
@@ -1692,11 +1779,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         updateChange();
       });
     });
-    document.getElementById('cashConfirm').addEventListener('click', function(){
-      finalizeOrderPayment(order, 'Cash');
-    });
+    if(!standalone){
+      document.getElementById('cashConfirm').addEventListener('click', function(){
+        finalizeOrderPayment(order, 'Cash');
+      });
+    }
     document.getElementById('modalCancel').addEventListener('click', function(){
-      openPaymentModal(order);
+      if(standalone){ closeModal(); } else { openPaymentModal(order); }
     });
     document.getElementById('modalBackdrop').addEventListener('click', function(e){
       if(e.target.id === 'modalBackdrop') closeModal();
@@ -1704,6 +1793,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   document.getElementById('serveList').addEventListener('click', function(e){
+    var cashCalcBtn = e.target.closest('[data-cash-calc]');
+    if(cashCalcBtn){
+      var calcOrder = data.openOrders.find(function(o){ return o.id === cashCalcBtn.dataset.cashCalc; });
+      if(calcOrder) openCashChangeModal(calcOrder, true);
+      return;
+    }
     var closeBtn = e.target.closest('[data-close-order]');
     if(closeBtn){
       var closedId = closeBtn.dataset.closeOrder;
