@@ -539,7 +539,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     <section class="view" id="view-orders">
       <div>
         <button class="big-cta" type="button" id="newOrderBigBtn">➕ New order 开新单</button>
-        <div class="section-title" style="margin-bottom:8px;">Adding to 加入到<button class="btn-ghost" type="button" id="undoOrderBtn" style="padding:6px 10px; font-size:.72rem;">↩ Undo last</button></div>
+        <div class="section-title" style="margin-bottom:8px;">Adding to 加入到</div>
         <div class="order-chip-row" id="orderChipRow"></div>
         <div id="activeOrderTypeRow" style="display:flex; gap:8px; margin-top:8px;"></div>
       </div>
@@ -968,12 +968,29 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(cloudSyncStatusEl) cloudSyncStatusEl.textContent = text;
   }
 
+  // Tracks whether the last cloud attempt worked, so a flash toast only pops up on the
+  // MOMENT things go wrong (or recover) instead of repeating every debounce/interval tick
+  // while the connection stays down — that would just be noise during service.
+  var cloudWasOk = true;
+  function noteCloudResult(ok, failMsg){
+    if(!ok && cloudWasOk){
+      cloudWasOk = false;
+      if(typeof flash === 'function') flash(failMsg);
+    } else if(ok && !cloudWasOk){
+      cloudWasOk = true;
+      if(typeof flash === 'function') flash('✓ Back online — synced 网络恢复了，已同步');
+    }
+  }
   var pushTimer = null;
   function pushToCloudNow(){
     setCloudStatus('Saving to cloud… 正在同步…');
     var savedAt = realData.lastSavedAt || new Date().toISOString();
     return sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
       setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
+      noteCloudResult(!res.error, '⚠ No internet connection — still saved on this device, will sync once back online\n没有网络连接 — 已保存在本机，恢复网络后会自动同步');
+    }).catch(function(){
+      setCloudStatus('⚠ Cloud sync failed 云端同步失败');
+      noteCloudResult(false, '⚠ No internet connection — still saved on this device, will sync once back online\n没有网络连接 — 已保存在本机，恢复网络后会自动同步');
     });
   }
   function pushToCloud(){
@@ -990,6 +1007,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     pushTimer = null;
     pushToCloudNow();
   }
+  // Immediate feedback the moment the device itself loses/regains internet — this fires
+  // right away instead of waiting for the next cloud attempt to time out, so if the app
+  // ever feels stuck this is the first place to look for a reason.
+  window.addEventListener('offline', function(){
+    noteCloudResult(false, '⚠ No internet connection — app still works, will sync once back online\n没有网络连接 — App 还是可以用，恢复网络后会自动同步');
+  });
+  window.addEventListener('online', function(){
+    if(!testMode) pushToCloud();
+  });
   window.addEventListener('pagehide', flushPendingCloudPush);
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState === 'hidden') flushPendingCloudPush();
@@ -1004,7 +1030,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(!sb) return;
     setCloudStatus('Loading from cloud… 正在读取云端…');
     sb.from('app_state').select('data, updated_at').eq('id', 1).maybeSingle().then(function(res){
-      if(res.error){ setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料'); return; }
+      if(res.error){
+        setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料');
+        noteCloudResult(false, '⚠ No internet connection — using the copy saved on this device\n没有网络连接 — 正在使用本机保存的资料');
+        return;
+      }
+      noteCloudResult(true);
       if(res.data && res.data.data){
         var cloudTime = res.data.updated_at ? new Date(res.data.updated_at).getTime() : 0;
         var localTime = realData.lastSavedAt ? new Date(realData.lastSavedAt).getTime() : 0;
@@ -1027,6 +1058,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       }
     }).catch(function(){
       setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料');
+      noteCloudResult(false, '⚠ No internet connection — using the copy saved on this device\n没有网络连接 — 正在使用本机保存的资料');
     });
   }
 
@@ -1075,6 +1107,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       btn.classList.add('active');
       document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
       document.getElementById('view-' + btn.dataset.view).classList.add('active');
+      // Safety net: if a modal was ever left open by mistake (e.g. an error interrupted
+      // closing it), its full-screen backdrop sits on top of everything and silently
+      // swallows every tap — switching tabs always clears it so buttons can't get stuck.
+      closeModal();
+      // Only the tab you're switching TO needs a fresh render here — see renderAll()
+      // below for why the others are skipped.
+      renderViewSpecific(btn.dataset.view);
     });
   });
 
@@ -1190,6 +1229,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
     var view = document.getElementById('view-' + viewName);
     if(view) view.classList.add('active');
+    renderViewSpecific(viewName);
   }
 
   document.getElementById('todayLabel').textContent = fmtDate(todayStr());
@@ -1699,28 +1739,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(!btn) return;
     data.orders = data.orders.filter(function(o){ return o.id !== btn.dataset.delOrder; });
     save(); renderAll();
-  });
-
-  document.getElementById('undoOrderBtn').addEventListener('click', function(){
-    if(!data.orders.length){ alert('No sales to undo. 没有可以撤销的记录。'); return; }
-    var last = data.orders[data.orders.length - 1];
-    // This undoes the single most recent SALE across the whole shop (not just the order
-    // chip you're currently viewing) — the order name is shown so you can see exactly
-    // which one before confirming, in case another order was served more recently.
-    var whichOrder = last.orderName ? (' from Order ' + last.orderName + ' 第 ' + last.orderName + ' 单') : '';
-    if(!confirm('Undo the most recent sale — "' + last.item + '" × ' + last.qty + whichOrder + '?\n\n撤销最近这一笔销售 — "' + last.item + '" × ' + last.qty + whichOrder + '？')) return;
-    data.orders.pop();
-    var inv = findInv(last.item);
-    if(inv) inv.qty += last.qty;
-    if(last.orderId){
-      var openOrder = data.openOrders.find(function(o){ return o.id === last.orderId; });
-      if(openOrder){
-        var line = openOrder.lines.find(function(l){ return l.saleId === last.id; });
-        if(line){ line.served = false; delete line.saleId; delete line.serveTime; }
-      }
-    }
-    save(); renderAll();
-    flash('✓ Undone — ' + last.item);
   });
 
   // ---- quick sell (tap buttons for parents) ----
@@ -2862,7 +2880,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         return '<div class="item-row" data-toggle-order="' + ev.orderId + '" style="cursor:pointer;">' +
             '<div class="main"><div class="t">Order ' + esc(ev.orderName) + payTag + '</div>' +
             '<div class="s">' + ev.lines.length + ' item' + (ev.lines.length===1?'':'s') + ' · tap to see 点击查看顾客买了什么</div></div>' +
-            '<div class="right"><span class="amt good">' + fmt(ev.amt) + '</span></div></div>' +
+            '<div class="right"><span class="amt good">' + fmt(ev.amt) + '</span>' +
+              '<button class="btn-ghost" type="button" data-fix-payment="' + ev.orderId + '" data-fix-payment-name="' + esc(ev.orderName) + '" style="padding:4px 8px; font-size:.68rem;" title="Change how this order was paid — use this if you tapped the wrong one (Cash/DuitNow) 改这张单的付款方式，如果按错了 Cash/DuitNow 可以用这个">✎ Payment</button>' +
+              '<button class="btn-ghost" type="button" data-cancel-order="' + ev.orderId + '" data-cancel-order-name="' + esc(ev.orderName) + '" style="padding:4px 8px; font-size:.68rem;" title="Cancel this order — puts stock back 撤销这张单，库存加回去">↩ Cancel</button>' +
+            '</div></div>' +
           '<div class="order-detail" id="orderDetail_' + ev.orderId + '" style="display:none; padding:2px 0 10px 14px;">' +
             ev.lines.map(function(l){
               return '<div class="s" style="padding:3px 0;">' + esc(l.item) + ' x ' + l.qty + ' - ' + fmt(l.qty*l.price) + '</div>';
@@ -2888,7 +2909,91 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }).join('') : '<div class="empty-note">No activity yet — log a sale or restock to get started.</div>';
   }
 
+  // Cancels a whole order straight from Dashboard → Recent activity — for when it was
+  // closed by mistake (typo'd item, accidentally hit "Close order"). This removes every
+  // sale record tied to that order (so it no longer counts in revenue/profit/history) and
+  // puts the stock for each of its items back, whether the order is still open or already
+  // closed. It deliberately does NOT touch today's order numbering — that's a separate
+  // concern and resets itself automatically at the next business day.
+  function cancelOrderFromHistory(orderId, orderName){
+    var lines = data.orders.filter(function(o){ return o.orderId === orderId; });
+    if(!lines.length){ flash('Nothing to cancel — no sale records found for this order'); return; }
+    if(!confirm('Cancel Order ' + orderName + '? This puts its stock back and removes it from sales/profit — use this if it was closed by mistake (e.g. wrong item typed in, or "Close order" tapped by accident).\n\n撤销订单 ' + orderName + '？库存会加回去，也会从销售/利润记录中移除 — 如果这张单是不小心结单/打错的，可以用这个。\n\n(This won\'t re-number today\'s orders — that resets by itself tomorrow. 不会重新排今天的单号，明天会自动重新开始。)')) return;
+    var undoSnapCancel = snapshotForUndo();
+    lines.forEach(function(o){
+      var inv = findInv(o.item);
+      if(inv) inv.qty += o.qty;
+    });
+    var cancelledSaleIds = lines.map(function(o){ return o.id; });
+    data.orders = data.orders.filter(function(o){ return o.orderId !== orderId; });
+    // if the order is still open (not yet closed), also un-mark its served lines so the
+    // Serve tab stays consistent instead of pointing at sale records that no longer exist
+    var openOrder = data.openOrders.find(function(o){ return o.id === orderId; });
+    if(openOrder){
+      openOrder.lines.forEach(function(l){
+        if(l.saleId && cancelledSaleIds.indexOf(l.saleId) !== -1){
+          l.served = false;
+          delete l.saleId;
+          delete l.serveTime;
+        }
+      });
+    }
+    save();
+    renderAll();
+    showUndoToast('Cancelled Order ' + orderName + ' 已撤销', undoSnapCancel);
+  }
+
+  // Lets you correct the payment method tag on an order straight from Dashboard history —
+  // for when the wrong button (Cash/DuitNow) was tapped by mistake. This only relabels how
+  // it was paid; it never touches stock, revenue, or profit (those are the same either way).
+  function fixPaymentMethodFromHistory(orderId, orderName){
+    var lines = data.orders.filter(function(o){ return o.orderId === orderId; });
+    if(!lines.length){ flash('Nothing to fix — no sale records found for this order'); return; }
+    var current = lines[0].paymentMethod;
+    var root = document.getElementById('quickModalRoot');
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modalBackdrop">' +
+        '<div class="modal-panel">' +
+          '<div class="modal-title">Order ' + esc(orderName) + '</div>' +
+          '<div class="modal-sub">Currently marked: ' + (current ? PAY_TAG[current] : '❔ not recorded') + ' — how did the customer actually pay? 顾客实际上是怎么付钱的？</div>' +
+          '<div class="qty-grid" style="grid-template-columns:1fr 1fr;">' +
+            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-fix-pay="Cash">💵 Cash 现金</button>' +
+            '<button class="qty-btn" style="font-size:1.05rem; padding:18px 4px;" data-fix-pay="DuitNow">📱 DuitNow</button>' +
+          '</div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn-ghost" type="button" id="modalCancel" style="width:100%;">Cancel</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    root.querySelectorAll('[data-fix-pay]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var method = btn.dataset.fixPay;
+        lines.forEach(function(o){ o.paymentMethod = method; });
+        var openOrder = data.openOrders.find(function(o){ return o.id === orderId; });
+        if(openOrder) openOrder.paymentMethod = method;
+        save();
+        closeModal();
+        renderAll();
+        flash('✓ Order ' + orderName + ' payment fixed — ' + method);
+      });
+    });
+    document.getElementById('modalCancel').addEventListener('click', closeModal);
+    document.getElementById('modalBackdrop').addEventListener('click', function(e){
+      if(e.target.id === 'modalBackdrop') closeModal();
+    });
+  }
+
   document.getElementById('recentList').addEventListener('click', function(e){
+    var fixBtn = e.target.closest('[data-fix-payment]');
+    if(fixBtn){
+      fixPaymentMethodFromHistory(fixBtn.dataset.fixPayment, fixBtn.dataset.fixPaymentName);
+      return;
+    }
+    var cancelBtn = e.target.closest('[data-cancel-order]');
+    if(cancelBtn){
+      cancelOrderFromHistory(cancelBtn.dataset.cancelOrder, cancelBtn.dataset.cancelOrderName);
+      return;
+    }
     var t = e.target.closest('[data-toggle-order]');
     if(!t) return;
     var detail = document.getElementById('orderDetail_' + t.dataset.toggleOrder);
@@ -3009,19 +3114,38 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
   }
 
+  // Renders only the one tab named — everything except Dashboard/Wastage/Restock History
+  // is cheap (bounded by how many items/open orders exist right now), but those three
+  // rebuild their lists from EVERY order/wastage/restock record ever logged, so they get
+  // slower the longer the app has been used. Calling only the tab actually on screen is
+  // what keeps tapping through Serve fast no matter how much history has piled up.
+  function renderViewSpecific(view){
+    if(view === 'dashboard'){
+      renderDashboard();
+    } else if(view === 'inventory'){
+      renderInventoryGrid();
+    } else if(view === 'warehouse'){
+      renderWarehouseGrid();
+    } else if(view === 'orders'){
+      renderOrders();
+      renderMenuDatalist();
+      renderItemLookup();
+      renderQuickGrid();
+      renderStockLeftList();
+    } else if(view === 'wastage'){
+      renderWastage();
+    } else if(view === 'restock'){
+      renderRestockHistory();
+    }
+  }
+
   function renderAll(){
-    renderDashboard();
-    renderInventoryGrid();
-    renderOrders();
-    renderWastage();
-    renderMenuDatalist();
-    renderItemLookup();
-    renderQuickGrid();
-    renderStockLeftList();
+    // Cheap and cross-tab: the Serve list/badge only scans currently-open orders (usually
+    // a handful), and the order-chip row is what keeps the Orders tab's locked/unlocked
+    // quick-sell grid correct — both stay fast regardless of how much history exists.
     renderOrderChips();
     renderTicket();
-    renderRestockHistory();
-    renderWarehouseGrid();
+    renderViewSpecific(currentViewName());
   }
   renderAll();
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
