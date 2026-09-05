@@ -60,6 +60,8 @@
   --good-soft:#E4EBDB;
   --bad:#AA4426;
   --bad-soft:#F5DFD3;
+  --cost-soft:#EDEAE2;
+  --cost-ink:#5B5347;
   --shadow: 0 1px 2px rgba(36,31,25,.06), 0 6px 16px -8px rgba(36,31,25,.18);
   font-variant-numeric: tabular-nums;
 }
@@ -77,6 +79,8 @@
     --good-soft:#26301E;
     --bad:#D97C5C;
     --bad-soft:#3A2418;
+    --cost-soft:#2E2A22;
+    --cost-ink:#B5AB9A;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 20px -8px rgba(0,0,0,.5);
   }
 }
@@ -93,6 +97,8 @@
   --good-soft:#26301E;
   --bad:#D97C5C;
   --bad-soft:#3A2418;
+  --cost-soft:#2E2A22;
+  --cost-ink:#B5AB9A;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 20px -8px rgba(0,0,0,.5);
 }
 
@@ -169,6 +175,34 @@ main{flex:1; padding:16px 16px 90px; display:flex; flex-direction:column; gap:18
 .field label{font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); font-weight:600;}
 .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
 .row3{display:grid; grid-template-columns:1.4fr 1fr 1fr; gap:10px;}
+.section-card{border-radius:14px; padding:12px 12px 4px; margin-bottom:12px;}
+.section-title{font-family:'Fraunces',serif; font-weight:600; font-size:.82rem; margin:0 0 10px; display:flex; align-items:center; gap:6px;}
+.chip{display:inline-flex; align-items:center; gap:4px; font-size:.62rem; font-weight:700; letter-spacing:.03em; padding:3px 8px; border-radius:6px; margin-bottom:6px;}
+.chip.cost{background:var(--cost-soft); color:var(--cost-ink);}
+.chip.price{background:var(--accent-soft); color:var(--accent-ink);}
+
+/* ---- Orders tab: big "new order" CTA + locked item grid until an order is active ---- */
+.big-cta{
+  width:100%; padding:14px; border-radius:14px; border:none; background:var(--accent);
+  color:#fff; font-weight:700; font-size:.95rem; margin-bottom:12px; box-shadow:var(--shadow);
+  font-family:inherit; cursor:pointer;
+}
+.item-area{position:relative;}
+.item-area.locked .quick-list{filter:blur(1.5px); opacity:.4; pointer-events:none;}
+.lock-msg{
+  position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+  text-align:center; padding:0 20px; z-index:2;
+}
+.item-area.locked .lock-msg{display:flex;}
+.lock-msg .box{
+  background:var(--paper-raised); border:1px solid var(--line); border-radius:12px;
+  padding:14px 16px; font-size:.78rem; font-weight:600; box-shadow:var(--shadow); line-height:1.5;
+}
+.quick-tile .total-ordered{
+  position:absolute; top:-6px; right:-6px; min-width:20px; height:20px; padding:0 5px;
+  border-radius:999px; background:#14b8a6; color:#fff; font-size:.72rem; font-weight:700;
+  display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow); z-index:1;
+}
 input,select{
   font:inherit; font-size:.95rem; padding:9px 10px; border-radius:9px;
   border:1px solid var(--line); background:var(--paper); color:var(--ink);
@@ -492,6 +526,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     <!-- ORDERS -->
     <section class="view" id="view-orders">
       <div>
+        <button class="big-cta" type="button" id="newOrderBigBtn">➕ New order 开新单</button>
         <div class="section-title" style="margin-bottom:8px;">Adding to 加入到<button class="btn-ghost" type="button" id="undoOrderBtn" style="padding:6px 10px; font-size:.72rem;">↩ Undo last</button></div>
         <div class="order-chip-row" id="orderChipRow"></div>
         <div id="activeOrderTypeRow" style="display:flex; gap:8px; margin-top:8px;"></div>
@@ -507,7 +542,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           <select id="tileSortMode3" style="margin-left:auto; font-size:.75rem; padding:4px 6px;"></select>
           <button class="btn-ghost" type="button" id="reorderBtn3" style="font-size:.72rem; padding:5px 8px;">✎ Rearrange 排序</button>
         </div>
-        <div class="quick-list" id="quickGrid"></div>
+        <div class="item-area" id="quickGridArea">
+          <div class="quick-list" id="quickGrid"></div>
+          <div class="lock-msg" id="quickGridLockMsg"><div class="box">👆 先按上面「➕ New order」<br>或者选一张已经开的单<br>才能开始点餐</div></div>
+        </div>
       </div>
 
       <div class="card" id="lookupCard">
@@ -1441,15 +1479,21 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
               '</div>' +
               '<button class="btn-ghost" type="button" id="whNameSave" style="width:100%;">Save name 保存名字</button>' +
 
-              '<div class="field"><label for="whEditWarehouseQty">Correct warehouse qty (' + esc(item.unit) + ') 更正仓库数量</label><input class="big-input" id="whEditWarehouseQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.warehouseQty + '"></div>' +
-              '<button class="btn-ghost" type="button" id="whQtySave" style="width:100%;">Save warehouse qty 保存仓库数量</button>' +
-
-              '<div class="muted-small" style="margin:0;">Changing price/cost only affects sales from today onward — past sales, profit and totals stay exactly as they were. 换价钱/成本只影响今天以后的销售，之前的记录不会变。</div>' +
-              '<div class="row2">' +
-                '<div class="field"><label for="whEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="whEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
-                '<div class="field"><label for="whEditPrice">Selling price (RM) 售价</label><input class="big-input" id="whEditPrice" type="number" inputmode="decimal" step="0.01" min="0" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
+              '<div class="section-card" style="background:var(--cost-soft);">' +
+                '<div class="section-title">📦 库存数量 Warehouse qty</div>' +
+                '<div class="field"><label for="whEditWarehouseQty">Correct warehouse qty (' + esc(item.unit) + ') 更正仓库数量</label><input class="big-input" id="whEditWarehouseQty" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.warehouseQty + '"></div>' +
+                '<button class="btn-ghost" type="button" id="whQtySave" style="width:100%; background:var(--paper-raised);">Save warehouse qty 保存仓库数量</button>' +
               '</div>' +
-              '<button class="btn-ghost" type="button" id="whPriceSave" style="width:100%;">Save price/cost 保存价钱/成本</button>' +
+
+              '<div class="section-card" style="background:var(--accent-soft);">' +
+                '<div class="section-title">💰 价钱设置 Price &amp; cost</div>' +
+                '<div class="muted-small" style="margin-top:-4px;">Changing price/cost only affects sales from today onward — past sales, profit and totals stay exactly as they were. 换价钱/成本只影响今天以后的销售，之前的记录不会变。</div>' +
+                '<span class="chip cost">🏷️ 你付出的 COST</span>' +
+                '<div class="field"><label for="whEditCost">Unit cost (RM) 单位成本</label><input class="big-input" id="whEditCost" type="number" inputmode="decimal" step="0.01" min="0" value="' + item.unitCost + '"></div>' +
+                '<span class="chip price">💵 顾客付的 SELL PRICE</span>' +
+                '<div class="field"><label for="whEditPrice">Selling price (RM) 售价</label><input class="big-input" id="whEditPrice" type="number" inputmode="decimal" step="0.01" min="0" style="border-color:var(--accent); font-size:1.3rem;" value="' + (item.sellPrice != null ? item.sellPrice : '') + '" placeholder="RM"></div>' +
+                '<button class="btn-ghost" type="button" id="whPriceSave" style="width:100%; background:var(--paper-raised);">Save price/cost 保存价钱/成本</button>' +
+              '</div>' +
               '<div class="row2">' +
                 '<div class="field"><label for="whEditCategory">Category</label><select id="whEditCategory">' + categoryOptionsHtml(item.category) + '</select></div>' +
                 '<div class="field"><label for="whEditUnit">Unit</label><select id="whEditUnit">' + unitOptionsHtml(item.unit) + '</select></div>' +
@@ -1701,6 +1745,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     wrap.innerHTML = html;
   }
 
+  // Total of this item across EVERY currently open order — lets you see at a glance
+  // "someone already ordered 2 of these" without leaving the Orders tab to check Serve.
+  function totalOrderedAcrossOpenOrders(itemId){
+    return data.openOrders.reduce(function(sum, o){
+      return sum + o.lines.reduce(function(s, l){ return s + (l.itemId === itemId ? l.qty : 0); }, 0);
+    }, 0);
+  }
+
   function renderQuickGrid(){
     var grid = document.getElementById('quickGrid');
     if(!data.inventory.length){
@@ -1715,7 +1767,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var priceLabel = (i.sellPrice != null) ? fmt(i.sellPrice) + ' each' : 'Set price in Inventory';
         var soldOut = i.qty <= 0;
+        var totalOrdered = totalOrderedAcrossOpenOrders(i.id);
         return '<div class="quick-tile' + (soldOut ? ' sold-out' : '') + '" data-quick-item="' + i.id + '">' +
+          (totalOrdered ? '<div class="total-ordered">' + totalOrdered + '</div>' : '') +
           (reorderMode ? '' : '<button class="qt-edit" data-edit-price="' + i.id + '" title="Edit selling price">✎</button>') +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
           '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
@@ -1745,6 +1799,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }
     var tile = e.target.closest('[data-quick-item]');
     if(!tile) return;
+    if(!activeOrder()){
+      flash('👆 Start a new order first 先开一张新单');
+      return;
+    }
     var item = data.inventory.find(function(i){ return i.id === tile.dataset.quickItem; });
     if(!item) return;
     if(item.qty <= 0){
@@ -1867,9 +1925,20 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return '<button class="order-chip' + (o.id === data.activeOrderId ? ' active' : '') + '" data-select-order="' + o.id + '">' +
         icon + esc(o.name) + (pending ? ' (' + pending + ')' : '') + '</button>';
     }).join('');
-    row.innerHTML = chips + '<button class="order-chip add" type="button" id="addOrderChip">+ Add order 加订单</button>';
+    // "+ New order" now lives as the big button above (#newOrderBigBtn) so it can't be
+    // missed when things get busy — the chip row is just for switching between orders.
+    row.innerHTML = chips;
     renderActiveOrderType();
+    // lock the quick-sell grid until at least one order exists and is selected, so nothing
+    // can accidentally get tapped into "nowhere" before a customer's order has been started
+    var area = document.getElementById('quickGridArea');
+    if(area) area.classList.toggle('locked', !activeOrder());
   }
+
+  document.getElementById('newOrderBigBtn').addEventListener('click', function(){
+    createOrder();
+    renderAll();
+  });
 
   // Lets you mark the currently active order as takeaway or dine-in right from the Orders
   // tab, so you can tell at a glance (and the customer/kitchen can too) how it's going out.
@@ -1896,11 +1965,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   });
 
   document.getElementById('orderChipRow').addEventListener('click', function(e){
-    if(e.target.closest('#addOrderChip')){
-      createOrder();
-      renderAll();
-      return;
-    }
     var sel = e.target.closest('[data-select-order]');
     if(!sel) return;
     data.activeOrderId = sel.dataset.selectOrder;
@@ -1918,10 +1982,20 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     } else {
       order.lines.push({id:uid('t'), itemId:item.id, itemName:label(item), qty:qty, price:item.sellPrice, cost:item.unitCost||0, served:false});
     }
+    // if this order was already marked paid, adding a new item means there's now money
+    // still owing for it — so undo the "paid" mark and let "Mark paid" be pressed again
+    // for the new total, instead of silently leaving it stuck on "✓ Paid" with unpaid stock.
+    var wasUndonePaid = false;
+    if(order.paymentMethod){
+      order.paymentMethod = null;
+      applyPaymentMethodToOrderSales(order, null);
+      wasUndonePaid = true;
+    }
     save();
     closeModal();
     renderAll();
-    flash('Added ' + item.nameEn + ' × ' + qty + ' to Order ' + order.name);
+    flash('Added ' + item.nameEn + ' × ' + qty + ' to Order ' + order.name +
+      (wasUndonePaid ? ' — marked unpaid again since there\'s a new item to pay for 又变回未付款了' : ''));
   }
 
   function addToTicket(item, qty){
@@ -2784,6 +2858,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
           '<div class="s">' + icon + ' ' + actionLabel + (t ? ' · ' + t : '') + '</div></div>' +
           '<div class="right" style="display:flex; align-items:center; gap:8px;"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span>' +
+          '<button class="btn-ghost" type="button" data-edit-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;" title="Edit amount 改数量">✎</button>' +
           '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button></div></div>';
       }).join('');
       return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
@@ -2794,6 +2869,44 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   document.getElementById('restockList').addEventListener('click', function(e){
+    var editBtn = e.target.closest('[data-edit-restock]');
+    if(editBtn){
+      var r = data.restocks.find(function(x){ return x.id === editBtn.dataset.editRestock; });
+      if(!r) return;
+      var raw = prompt('Correct the amount for ' + r.itemName + '\n更正 ' + r.itemName + ' 的数量\n\n(currently ' + r.qty + ' ' + r.unit + ')', r.qty);
+      if(raw == null) return;
+      var newQty = parseFloat(raw);
+      if(isNaN(newQty) || newQty < 0){ flash('⚠ Enter a valid number 请输入正确的数字'); return; }
+      if(newQty === r.qty){ return; }
+      var item = data.inventory.find(function(i){ return i.id === r.itemId; });
+      if(item){
+        // reverse the old amount's effect (same math as the 🗑 undo button above),
+        // then re-apply with the corrected amount — so warehouse/stall always end up
+        // exactly where they'd be if this record had been logged correctly the first time.
+        if(r.type === 'buy'){
+          item.warehouseQty = Math.max(0, item.warehouseQty - r.qty);
+          item.warehouseQty += newQty;
+        } else if(r.type === 'bring'){
+          item.qty = Math.max(0, item.qty - r.qty);
+          item.warehouseQty += r.qty;
+          item.qty += newQty;
+          item.warehouseQty = Math.max(0, item.warehouseQty - newQty);
+        } else if(r.type === 'return'){
+          item.warehouseQty = Math.max(0, item.warehouseQty - r.qty);
+          item.qty += r.qty;
+          item.qty = Math.max(0, item.qty - newQty);
+          item.warehouseQty += newQty;
+        }
+      }
+      var oldQty = r.qty;
+      r.qty = newQty;
+      save();
+      renderAll();
+      flash(item
+        ? ('✓ Corrected — ' + r.itemName + ' ' + oldQty + ' → ' + newQty + ' ' + r.unit)
+        : ('✓ Record updated (item no longer exists, stock unaffected)'));
+      return;
+    }
     var btn = e.target.closest('[data-del-restock]');
     if(!btn) return;
     var r = data.restocks.find(function(x){ return x.id === btn.dataset.delRestock; });
