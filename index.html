@@ -468,12 +468,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           </div>
           <div class="row2">
             <div class="field"><label for="invCategory">Category 分类</label>
-              <select id="invCategory">
-                <option value="Pau">Pau 包</option>
-                <option value="Dimsum">Dimsum 点心</option>
-                <option value="TongSui">Tong Sui 糖水</option>
-                <option value="Other">Other 其他</option>
-              </select>
+              <select id="invCategory"></select>
             </div>
             <div class="field"><label for="invUnit">Unit 单位</label>
               <select id="invUnit">
@@ -627,8 +622,34 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   };
 
   // ---- categories ----
+  // The default starter categories. From here on, the *actual* list lives on
+  // data.categories so Evvyne's parents can add their own (Noodles, Drinks, etc)
+  // beyond just Pau/Dimsum/Tong Sui — see categoryOptionsHtml() and addNewCategory().
   var CATEGORIES = ["Pau","Dimsum","TongSui","Other"];
   var CAT_LABEL = {Pau:"Pau 包", Dimsum:"Dimsum 点心", TongSui:"Tong Sui 糖水", Other:"Other 其他"};
+  var NEW_CATEGORY_VALUE = "__new_category__";
+  function categoryLabel(cat){
+    return CAT_LABEL[cat] || cat;
+  }
+  function allCategories(){
+    return (data && data.categories && data.categories.length) ? data.categories : CATEGORIES;
+  }
+  // Adds a brand-new category (typed by the user) to data.categories, keeping "Other"
+  // pinned to the end of the list. Returns the new category name, or null if cancelled/empty.
+  function addNewCategory(){
+    var name = prompt('New category name 新的分类名字\n(e.g. Noodles 面, Drinks 饮料)');
+    if(name == null) return null;
+    name = name.trim();
+    if(!name) return null;
+    var exists = data.categories.some(function(c){ return c.toLowerCase() === name.toLowerCase(); });
+    if(exists) return name;
+    var others = data.categories.filter(function(c){ return c !== 'Other'; });
+    others.push(name);
+    if(data.categories.indexOf('Other') !== -1) others.push('Other');
+    data.categories = others;
+    save();
+    return name;
+  }
 
   function label(i){
     return i.nameZh ? (i.nameEn + ' ' + i.nameZh) : i.nameEn;
@@ -666,7 +687,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       restocks: [],
       openOrders: [],
       orderCounter: 0,
-      activeOrderId: null
+      activeOrderId: null,
+      categories: CATEGORIES.slice()
     };
   };
 
@@ -679,7 +701,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     return opts.map(function(u){ return '<option value="' + esc(u) + '"' + (u===selected?' selected':'') + '>' + esc(u) + '</option>'; }).join('');
   }
   function categoryOptionsHtml(selected){
-    return CATEGORIES.map(function(c){ return '<option value="' + c + '"' + (c===selected?' selected':'') + '>' + CAT_LABEL[c] + '</option>'; }).join('');
+    return allCategories().map(function(c){ return '<option value="' + esc(c) + '"' + (c===selected?' selected':'') + '>' + esc(categoryLabel(c)) + '</option>'; }).join('')
+      + '<option value="' + NEW_CATEGORY_VALUE + '">+ Add new category 添加分类…</option>';
   }
   function reorderOptionsHtml(selected){
     var out = '<option value="">No reminder</option>';
@@ -726,6 +749,17 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
     d.restocks.forEach(function(r){ if(!r.type) r.type = 'buy'; });
 
+    // backfill the (now user-extendable) category list, and pick up any category
+    // an item already used but that isn't in the list yet (older data safety)
+    if(!d.categories || !d.categories.length) d.categories = CATEGORIES.slice();
+    d.inventory.forEach(function(i){
+      if(i.category && d.categories.indexOf(i.category) === -1){
+        var idx = d.categories.indexOf('Other');
+        if(idx === -1) d.categories.push(i.category);
+        else d.categories.splice(idx, 0, i.category);
+      }
+    });
+
     // seed the standard 13-item menu ONCE — only the very first time this device/account
     // ever loads (before defaultsSeeded is set). After that, if you remove an item on
     // purpose, it stays removed and won't be silently re-added on the next load.
@@ -753,9 +787,29 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     // quantities. Whatever is still at the stall stays at the stall; use "Return unsold"
     // yourself when you actually pack up and bring it back to the warehouse.
     if(d.lastStallResetDate !== todayStr()){
+      var hadPrevDate = !!d.lastStallResetDate;
       d.lastStallResetDate = todayStr();
+      // also start the order numbers fresh from 1 each new business day —
+      // but only if there WAS a previous date on record, so we don't zero out
+      // an existing orderCounter on the very first load of old data.
+      if(hadPrevDate){
+        resetOrderCounterForNewDay(d);
+      }
     }
     return d;
+  }
+
+  // Starts order numbers fresh from 1 each new business day — UNLESS an order from
+  // before the rollover is still open (not yet closed). In that case we keep counting
+  // up after the highest number still in use, so a leftover "Order 3" from yesterday
+  // can never end up on screen at the same time as a brand new "Order 3" today.
+  function resetOrderCounterForNewDay(d){
+    var maxOpenNum = 0;
+    (d.openOrders || []).forEach(function(o){
+      var n = parseInt(o.name, 10);
+      if(!isNaN(n) && n > maxOpenNum) maxOpenNum = n;
+    });
+    d.orderCounter = maxOpenNum;
   }
 
   var TEST_STORE_KEY = "truckledger_v1_test";
@@ -1086,6 +1140,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('todayLabel').textContent = fmtDate(todayStr());
   document.getElementById('invReorder').innerHTML = reorderOptionsHtml('');
+  document.getElementById('invCategory').innerHTML = categoryOptionsHtml('');
+  document.getElementById('invCategory').addEventListener('change', function(){
+    var sel = document.getElementById('invCategory');
+    if(sel.value !== NEW_CATEGORY_VALUE) return;
+    var made = addNewCategory();
+    sel.innerHTML = categoryOptionsHtml(made || '');
+  });
 
   // ---- inventory logic ----
   function findInv(text){
@@ -1105,10 +1166,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return;
     }
     var html = '';
-    CATEGORIES.forEach(function(cat){
+    allCategories().forEach(function(cat){
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat; }));
       if(!items.length) return;
-      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="cat-header">' + categoryLabel(cat) + '</div>';
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var low = i.reorder != null && (i.qty + i.warehouseQty) <= i.reorder;
         var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
@@ -1183,7 +1244,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div class="modal-backdrop" id="modalBackdrop">' +
         '<div class="modal-panel">' +
           '<div class="modal-title">' + esc(label(item)) + '</div>' +
-          '<div class="modal-sub">' + CAT_LABEL[item.category] + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
+          '<div class="modal-sub">' + categoryLabel(item.category) + ' · ' + (item.sellPrice != null ? fmt(item.sellPrice) + ' sell' : 'no price set') + ' · 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' waiting in warehouse</div>' +
 
           '<div class="section-title" style="font-size:.85rem; margin:0;">🚚 Bring to stall 带去摊位 — 🏬 ' + item.warehouseQty + ' ' + esc(item.unit) + ' in warehouse</div>' +
           '<div class="qty-grid" style="grid-template-columns:repeat(5,1fr);">' +
@@ -1311,10 +1372,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return;
     }
     var html = '';
-    CATEGORIES.forEach(function(cat){
+    allCategories().forEach(function(cat){
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat; }));
       if(!items.length) return;
-      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="cat-header">' + categoryLabel(cat) + '</div>';
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
         return '<div class="quick-tile" data-wh-item="' + i.id + '">' +
@@ -1450,8 +1511,16 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       refreshWhModalSub();
       flash('✓ Price/cost updated from today — past sales unaffected');
     });
+    document.getElementById('whEditCategory').addEventListener('change', function(){
+      var sel = document.getElementById('whEditCategory');
+      if(sel.value !== NEW_CATEGORY_VALUE) return;
+      var made = addNewCategory();
+      sel.innerHTML = categoryOptionsHtml(made || item.category);
+    });
     document.getElementById('whCatSave').addEventListener('click', function(){
-      item.category = document.getElementById('whEditCategory').value;
+      var catVal = document.getElementById('whEditCategory').value;
+      if(catVal === NEW_CATEGORY_VALUE){ flash('⚠ Pick or add a category first 请先选择或添加分类'); return; }
+      item.category = catVal;
       item.unit = document.getElementById('whEditUnit').value;
       var reorderRaw = document.getElementById('whEditReorder').value;
       item.reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
@@ -1504,6 +1573,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var reorder = reorderRaw === '' ? null : parseFloat(reorderRaw);
     var priceRaw = document.getElementById('invSellPrice').value;
     if(!nameEn || isNaN(qty) || isNaN(cost)) return;
+    if(category === NEW_CATEGORY_VALUE){ flash('⚠ Pick or add a category first 请先选择或添加分类'); return; }
 
     var existing = findInv(nameEn);
     if(existing){
@@ -1614,10 +1684,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return;
     }
     var html = '';
-    CATEGORIES.forEach(function(cat){
+    allCategories().forEach(function(cat){
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat; }));
       if(!items.length) return;
-      html += '<div class="cat-header" style="margin-top:6px;">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="cat-header" style="margin-top:6px;">' + categoryLabel(cat) + '</div>';
       items.forEach(function(i){
         var soldOut = i.qty <= 0;
         html += '<div style="display:flex; justify-content:space-between; align-items:center; font-size:.85rem; padding:5px 0; border-bottom:1px solid var(--line);">' +
@@ -1638,10 +1708,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       return;
     }
     var html = '';
-    CATEGORIES.forEach(function(cat){
+    allCategories().forEach(function(cat){
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat; }));
       if(!items.length) return;
-      html += '<div class="cat-header">' + CAT_LABEL[cat] + '</div>';
+      html += '<div class="cat-header">' + categoryLabel(cat) + '</div>';
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var priceLabel = (i.sellPrice != null) ? fmt(i.sellPrice) + ' each' : 'Set price in Inventory';
         var soldOut = i.qty <= 0;
@@ -1863,10 +1933,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   // wrong order chip back on the Orders tab.
   function openAddItemModal(order){
     var root = document.getElementById('quickModalRoot');
-    var itemsHtml = CATEGORIES.map(function(cat){
+    var itemsHtml = allCategories().map(function(cat){
       var items = sortItems(data.inventory.filter(function(i){ return i.category === cat && i.sellPrice != null; }));
       if(!items.length) return '';
-      return '<div class="cat-header">' + CAT_LABEL[cat] + '</div><div class="quick-grid">' + items.map(function(i){
+      return '<div class="cat-header">' + categoryLabel(cat) + '</div><div class="quick-grid">' + items.map(function(i){
         var soldOut = i.qty <= 0;
         return '<div class="quick-tile' + (soldOut ? ' sold-out' : '') + '" data-add-item="' + i.id + '">' +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
@@ -2371,13 +2441,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   // ---- wastage logic ----
   function wasteItemOptionsHtml(){
     var byCat = {};
-    CATEGORIES.forEach(function(c){ byCat[c] = []; });
+    allCategories().forEach(function(c){ byCat[c] = []; });
     data.inventory.forEach(function(i){ (byCat[i.category] || (byCat[i.category]=[])).push(i); });
     var out = '';
-    CATEGORIES.forEach(function(c){
+    allCategories().forEach(function(c){
       var items = byCat[c] || [];
       if(!items.length) return;
-      out += '<optgroup label="' + esc(CAT_LABEL[c]) + '">';
+      out += '<optgroup label="' + esc(categoryLabel(c)) + '">';
       items.forEach(function(i){
         out += '<option value="' + i.id + '">' + esc(label(i)) + '</option>';
       });
@@ -2792,6 +2862,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var d = todayStr();
     if(data.lastStallResetDate !== d){
       data.lastStallResetDate = d;
+      resetOrderCounterForNewDay(data);
       save();
       renderAll();
     }
