@@ -388,6 +388,18 @@ nav.tabs button.active{color:var(--accent); background:var(--accent-soft);}
 }
 .flash-toast.show{transform:translateX(-50%) translateY(0);}
 
+.undo-toast{
+  position:fixed; bottom:14px; left:50%; transform:translateX(-50%) translateY(140%);
+  background:var(--ink); color:var(--paper); font-weight:600; font-size:.82rem;
+  padding:10px 10px 10px 16px; border-radius:999px; box-shadow:var(--shadow); z-index:91;
+  transition:transform .25s ease; display:flex; align-items:center; gap:10px; max-width:90vw;
+}
+.undo-toast.show{transform:translateX(-50%) translateY(0);}
+.undo-toast #undoToastBtn{
+  background:var(--accent); color:#fff; border:none; border-radius:999px; padding:6px 14px;
+  font-weight:700; font-size:.78rem; font-family:inherit; flex:none;
+}
+
 details.manual-entry{background:var(--paper-raised); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);}
 details.manual-entry summary{
   padding:13px 16px; font-weight:600; font-size:.88rem; color:var(--ink-soft); cursor:pointer;
@@ -622,7 +634,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   <nav class="tabs">
     <button class="tab-btn active" data-view="dashboard"><span class="ic">◈</span><span class="en">Dashboard</span><span class="zh">总览</span></button>
-    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span><span class="en">Stall</span><span class="zh">摊位</span><span class="tab-badge" id="lowStockBadge" hidden>0</span></button>
+    <button class="tab-btn" data-view="inventory"><span class="ic">▤</span><span class="en">Stall</span><span class="zh">摊位</span></button>
     <button class="tab-btn" data-view="warehouse"><span class="ic">🏬</span><span class="en">Warehouse</span><span class="zh">仓库</span></button>
     <button class="tab-btn" data-view="orders"><span class="ic">✎</span><span class="en">Orders</span><span class="zh">点单</span></button>
     <button class="tab-btn" data-view="serve"><span class="ic">☑</span><span class="en">Serve</span><span class="zh">上菜</span><span class="tab-badge" id="ticketBadge" hidden>0</span></button>
@@ -633,6 +645,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
 <div id="quickModalRoot"></div>
 <div class="flash-toast" id="flashToast"></div>
+<div class="undo-toast" id="undoToast">
+  <span id="undoToastMsg"></span>
+  <button type="button" id="undoToastBtn">Undo 复原</button>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
@@ -1585,17 +1601,18 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(item.qty > 0) warnings.push(item.qty + ' ' + item.unit + ' still at the stall 摊位还有 ' + item.qty);
       if(item.warehouseQty > 0) warnings.push(item.warehouseQty + ' ' + item.unit + ' still in the warehouse 仓库还有 ' + item.warehouseQty);
       if(pendingLines.length) warnings.push(pendingLines.length + ' pending order line(s) not yet served 还有 ' + pendingLines.length + ' 笔订单还没上菜');
-      var msg = 'Remove "' + label(item) + '" from inventory? 确定要删除 "' + label(item) + '" 这个品项吗？\n\nThis cannot be undone. 这个动作无法撤销。';
+      var msg = 'Remove "' + label(item) + '" from inventory? 确定要删除 "' + label(item) + '" 这个品项吗？';
       if(warnings.length){
         msg = '⚠ "' + label(item) + '" still has:\n' + warnings.map(function(w){ return '• ' + w; }).join('\n') +
           '\n\nDeleting it now will lose that record. Are you sure?\n\n"' + label(item) + '" 还有以上没处理完的东西,删除后这些记录会一起消失,确定吗？';
       }
       if(!confirm(msg)) return;
+      var undoSnap = snapshotForUndo();
       data.inventory = data.inventory.filter(function(i){ return i.id !== item.id; });
       save();
       closeModal();
       renderAll();
-      flash('Removed ' + item.nameEn);
+      showUndoToast('Removed ' + item.nameEn + ' 已删除', undoSnap);
     });
     document.getElementById('modalCancel').addEventListener('click', closeModal);
     document.getElementById('modalBackdrop').addEventListener('click', function(e){
@@ -1716,6 +1733,53 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     flashTimer = setTimeout(function(){ el.classList.remove('show'); }, 1600);
   }
 
+  // ---- undo safety net for deletions ----
+  // A confirm() dialog alone doesn't help if you tap through it fast without reading it, so
+  // every delete also gets a few seconds of "Undo" after it happens — a full snapshot of the
+  // affected data is taken right before the delete, so Undo restores it exactly as it was
+  // (order + its sale records + stock numbers together), not a hand-rolled reverse-of-reverse.
+  var undoTimer = null;
+  var pendingUndoSnapshot = null;
+  function snapshotForUndo(){
+    return JSON.parse(JSON.stringify({
+      openOrders: data.openOrders,
+      orders: data.orders,
+      inventory: data.inventory,
+      restocks: data.restocks,
+      wastage: data.wastage,
+      activeOrderId: data.activeOrderId,
+      orderCounter: data.orderCounter
+    }));
+  }
+  function showUndoToast(msg, snapshot){
+    pendingUndoSnapshot = snapshot;
+    var el = document.getElementById('undoToast');
+    document.getElementById('undoToastMsg').textContent = msg;
+    el.classList.add('show');
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(function(){
+      el.classList.remove('show');
+      pendingUndoSnapshot = null;
+    }, 8000);
+  }
+  document.getElementById('undoToastBtn').addEventListener('click', function(){
+    if(!pendingUndoSnapshot) return;
+    var snap = pendingUndoSnapshot;
+    data.openOrders = snap.openOrders;
+    data.orders = snap.orders;
+    data.inventory = snap.inventory;
+    data.restocks = snap.restocks;
+    data.wastage = snap.wastage;
+    data.activeOrderId = snap.activeOrderId;
+    data.orderCounter = snap.orderCounter;
+    pendingUndoSnapshot = null;
+    clearTimeout(undoTimer);
+    document.getElementById('undoToast').classList.remove('show');
+    save();
+    renderAll();
+    flash('✓ Restored 已复原');
+  });
+
   // Read-only "what's left" list shown as a dropdown on the Orders tab, so you can glance
   // at today's remaining stall stock (and show a customer) without tapping into an item.
   // Sold-out items show a crossed-out "Sold out" tag instead of "0" so it reads clearly.
@@ -1747,10 +1811,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   // Total of this item across EVERY currently open order — lets you see at a glance
   // "someone already ordered 2 of these" without leaving the Orders tab to check Serve.
-  function totalOrderedAcrossOpenOrders(itemId){
-    return data.openOrders.reduce(function(sum, o){
-      return sum + o.lines.reduce(function(s, l){ return s + (l.itemId === itemId ? l.qty : 0); }, 0);
-    }, 0);
+  // How many of this item are in the CURRENTLY SELECTED order — switch orders and the
+  // number switches with it, so you always see "this customer's" count, not a combined total.
+  function qtyInActiveOrder(itemId){
+    var order = activeOrder();
+    if(!order) return 0;
+    return order.lines.reduce(function(s, l){ return s + (l.itemId === itemId ? l.qty : 0); }, 0);
   }
 
   function renderQuickGrid(){
@@ -1767,7 +1833,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var priceLabel = (i.sellPrice != null) ? fmt(i.sellPrice) + ' each' : 'Set price in Inventory';
         var soldOut = i.qty <= 0;
-        var totalOrdered = totalOrderedAcrossOpenOrders(i.id);
+        var totalOrdered = qtyInActiveOrder(i.id);
         return '<div class="quick-tile' + (soldOut ? ' sold-out' : '') + '" data-quick-item="' + i.id + '">' +
           (totalOrdered ? '<div class="total-ordered">' + totalOrdered + '</div>' : '') +
           (reorderMode ? '' : '<button class="qt-edit" data-edit-price="' + i.id + '" title="Edit selling price">✎</button>') +
@@ -2342,6 +2408,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         ? 'Delete Order ' + delOrder.name + '? This also reverses its ' + servedCount + ' served sale' + (servedCount===1?'':'s') + ' and puts the stock back.'
         : 'Delete Order ' + delOrder.name + '?';
       if(!confirm(msg)) return;
+      var undoSnapOrder = snapshotForUndo();
       delOrder.lines.forEach(function(line){
         if(line.served){
           data.orders = data.orders.filter(function(o){ return o.id !== line.saleId; });
@@ -2355,7 +2422,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       }
       save();
       renderAll();
-      flash('Deleted Order ' + delOrder.name);
+      showUndoToast('Deleted Order ' + delOrder.name + ' 已删除', undoSnapOrder);
       return;
     }
     var orderEl = e.target.closest('[data-order-id]');
@@ -2369,6 +2436,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(!line) return;
       if(line.served){
         if(!confirm('Remove "' + line.itemName + '" and reverse its sale?')) return;
+      }
+      var undoSnapLine = snapshotForUndo();
+      if(line.served){
         data.orders = data.orders.filter(function(o){ return o.id !== line.saleId; });
         var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
         if(inv) inv.qty += line.qty;
@@ -2376,6 +2446,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       order.lines = order.lines.filter(function(l){ return l.id !== line.id; });
       save();
       renderAll();
+      showUndoToast('Removed ' + line.itemName + ' 已删除', undoSnapLine);
       return;
     }
 
@@ -2601,8 +2672,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   document.getElementById('wasteList').addEventListener('click', function(e){
     var btn = e.target.closest('[data-del-waste]');
     if(!btn) return;
-    data.wastage = data.wastage.filter(function(w){ return w.id !== btn.dataset.delWaste; });
+    var w = data.wastage.find(function(x){ return x.id === btn.dataset.delWaste; });
+    var undoSnapWaste = snapshotForUndo();
+    data.wastage = data.wastage.filter(function(x){ return x.id !== btn.dataset.delWaste; });
     save(); renderAll();
+    showUndoToast('Removed wastage record 已删除记录' + (w ? ' — ' + w.item : ''), undoSnapWaste);
   });
 
   // ---- dashboard ----
@@ -2744,8 +2818,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
     var low = data.inventory.filter(function(i){ return i.reorder != null && (i.qty + i.warehouseQty) <= i.reorder; });
     document.getElementById('lowStockCount').textContent = low.length;
-    var lowBadge = document.getElementById('lowStockBadge');
-    if(lowBadge){ lowBadge.hidden = low.length === 0; lowBadge.textContent = low.length; }
     var lowEl = document.getElementById('lowStockList');
     lowEl.innerHTML = low.length ? low.map(function(i){
       var total = i.qty + i.warehouseQty;
@@ -2912,6 +2984,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var r = data.restocks.find(function(x){ return x.id === btn.dataset.delRestock; });
     if(!r) return;
     if(!confirm('Delete this record and undo it? ' + r.itemName + ' ' + (r.type === 'return' ? '-' : '+') + r.qty + ' ' + r.unit + ' will be reversed.\n\n删除这条记录并撤销？' + r.itemName + ' 的数量会自动改回去。')) return;
+    var undoSnapRestock = snapshotForUndo();
     var item = data.inventory.find(function(i){ return i.id === r.itemId; });
     if(item){
       if(r.type === 'buy'){
@@ -2927,7 +3000,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     data.restocks = data.restocks.filter(function(x){ return x.id !== r.id; });
     save();
     renderAll();
-    flash(item ? ('✓ Undone — ' + r.itemName) : ('✓ Record removed (item no longer exists)'));
+    showUndoToast(item ? ('Undone — ' + r.itemName + ' 已撤销') : ('Record removed 记录已删除'), undoSnapRestock);
   });
 
   function esc(s){
