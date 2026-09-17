@@ -630,6 +630,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <div class="list" id="restockList" style="margin-top:8px;"></div>
       </div>
     </section>
+
+    <!-- SOLD TODAY -->
+    <section class="view" id="view-soldtoday">
+      <div>
+        <div class="section-title">Sold today 今天卖了<span class="count" id="soldTodayCount">0</span></div>
+        <div class="list" id="soldTodayList" style="margin-top:8px;"></div>
+      </div>
+    </section>
   </main>
 
   <nav class="tabs">
@@ -638,6 +646,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     <button class="tab-btn" data-view="warehouse"><span class="ic">🏬</span><span class="en">Warehouse</span><span class="zh">仓库</span></button>
     <button class="tab-btn" data-view="orders"><span class="ic">✎</span><span class="en">Orders</span><span class="zh">点单</span></button>
     <button class="tab-btn" data-view="serve"><span class="ic">☑</span><span class="en">Serve</span><span class="zh">上菜</span><span class="tab-badge" id="ticketBadge" hidden>0</span></button>
+    <button class="tab-btn" data-view="soldtoday"><span class="ic">📊</span><span class="en">Sold Today</span><span class="zh">今天卖了</span></button>
     <button class="tab-btn" data-view="wastage"><span class="ic">⚠</span><span class="en">Wastage</span><span class="zh">损耗</span></button>
     <button class="tab-btn" data-view="restock"><span class="ic">↻</span><span class="en">History</span><span class="zh">记录</span></button>
   </nav>
@@ -1127,7 +1136,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   ];
   var sortMode = localStorage.getItem(SORT_KEY) || 'alpha';
   var reorderMode = false;
-  var expandedStallItems = {}; // itemId -> true when its "sold today" panel is expanded on the Stall tab
   function syncItemOrder(){
     var ids = data.inventory.map(function(i){ return i.id; });
     var order = (data.itemOrder || []).filter(function(id){ return ids.indexOf(id) !== -1; });
@@ -1267,15 +1275,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       html += '<div class="quick-grid">' + items.map(function(i, idx){
         var low = i.reorder != null && (i.qty + i.warehouseQty) <= i.reorder;
         var priceLabel = i.sellPrice != null ? fmt(i.sellPrice) + ' sell' : 'No price set';
-        var expanded = !!expandedStallItems[i.id];
-        return '<div class="quick-tile' + (expanded ? ' expanded' : '') + '" data-inv-item="' + i.id + '" style="cursor:pointer;">' +
+        return '<div class="quick-tile" data-inv-item="' + i.id + '" style="cursor:pointer;">' +
           (reorderMode ? '' : '<button class="qt-edit" data-edit-item="' + i.id + '" title="Edit 编辑">✎</button>') +
           '<div class="qt-name">' + esc(i.nameEn) + (i.nameZh ? '<span class="zh">' + esc(i.nameZh) + '</span>' : '') + '</div>' +
           '<div class="qt-price' + (i.sellPrice == null ? ' unset' : '') + '">' + priceLabel + '</div>' +
           '<div class="qt-stock' + (low ? ' low' : '') + '">' + i.qty.toFixed(i.qty % 1 === 0 ? 0 : 2) + ' ' + esc(i.unit) + ' at stall' + (low ? ' · low!' : '') + '</div>' +
-          '<div class="qt-stock" style="margin-top:2px;">' + (expanded ? '▲ Hide sold today 收起' : '▼ Sold today 今天卖了') + '</div>' +
           (reorderMode ? moveArrowsHtml(i.id, idx, items) : '') +
-          (expanded ? ('<div style="margin-top:6px; cursor:default;" onclick="event.stopPropagation();">' + soldTodayHtml(i) + '</div>') : '') +
           '</div>';
       }).join('') + '</div>';
     });
@@ -1300,13 +1305,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }
     var tile = e.target.closest('[data-inv-item]');
     if(!tile) return;
-    var id = tile.dataset.invItem;
-    expandedStallItems[id] = !expandedStallItems[id];
-    renderInventoryGrid();
+    openInvEditModal(tile.dataset.invItem);
   });
 
-  // Builds the "Sold today" summary block shown inside an item's modal — total qty and
-  // revenue sold today, plus a per-order breakdown so you can see exactly when it sold.
+  // Builds the "Sold today" summary block for one item — total qty and revenue sold today,
+  // plus a per-order breakdown so you can see exactly when it sold. Used by the dedicated
+  // "Sold Today" tab (renderSoldToday), which lists every item this way in one place instead
+  // of having to open each item on the Stall tab one at a time.
   function soldTodayHtml(item){
     var today = todayStr();
     var name = label(item);
@@ -1327,6 +1332,46 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     }).join('');
     return '<div class="section-title" style="font-size:.85rem; margin:2px 0 0;">📊 Sold today 今天卖了 — ' + totalQty + ' ' + esc(item.unit) + ' · ' + fmt(totalRevenue) + '</div>' +
       '<div style="margin:0 0 4px;">' + rows + '</div>';
+  }
+
+  // The "Sold Today" tab — every item that's sold at least once today, in one list, with
+  // total qty + revenue per item (e.g. "叉烧包 x 10 · RM 30") and the per-order breakdown one
+  // tap away. Only scans today's sale records, so it stays cheap and fast even as history
+  // piles up (same reasoning as renderOrderChips/renderTicket in renderAll()).
+  function renderSoldToday(){
+    var today = todayStr();
+    var todaySales = data.orders.filter(function(o){ return o.date === today; });
+    var byItem = {};
+    var order = [];
+    todaySales.forEach(function(o){
+      if(!byItem[o.item]){ byItem[o.item] = {name: o.item, qty: 0, revenue: 0, sales: []}; order.push(o.item); }
+      byItem[o.item].qty += o.qty;
+      byItem[o.item].revenue += o.qty * o.price;
+      byItem[o.item].sales.push(o);
+    });
+    var listEl = document.getElementById('soldTodayList');
+    var countEl = document.getElementById('soldTodayCount');
+    var items = order.map(function(name){ return byItem[name]; }).sort(function(a,b){ return b.qty - a.qty; });
+    countEl.textContent = String(items.length);
+    if(!items.length){
+      listEl.innerHTML = '<div class="empty-note">Nothing sold yet today. 今天还没卖出。</div>';
+      return;
+    }
+    listEl.innerHTML = items.map(function(it){
+      var inv = findInv(it.name);
+      var unit = inv ? inv.unit : '';
+      var rows = it.sales.slice().sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); }).map(function(o){
+        var t = o.time ? new Date(o.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+        return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--line);">' +
+          '<span>' + t + (o.orderName ? ' · Order ' + esc(o.orderName) : '') + '</span>' +
+          '<span>×' + o.qty + ' · ' + fmt(o.qty * o.price) + '</span>' +
+        '</div>';
+      }).join('');
+      return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;">' +
+        '<summary>' + esc(it.name) + ' — ' + it.qty + ' ' + esc(unit) + ' · ' + fmt(it.revenue) + '</summary>' +
+        '<div style="padding:0 16px 12px;">' + rows + '</div>' +
+      '</details>';
+    }).join('');
   }
 
   function openInvEditModal(itemId){
@@ -3136,6 +3181,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       renderWastage();
     } else if(view === 'restock'){
       renderRestockHistory();
+    } else if(view === 'soldtoday'){
+      renderSoldToday();
     }
   }
 
