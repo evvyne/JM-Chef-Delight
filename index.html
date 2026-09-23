@@ -855,10 +855,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       d.defaultsSeeded = true;
     }
 
-    // daily refresh: just moves the "business day" label forward at the 3am boundary so
-    // Today's orders/wastage/dashboard start fresh — it does NOT touch stall or warehouse
-    // quantities. Whatever is still at the stall stays at the stall; use "Return unsold"
-    // yourself when you actually pack up and bring it back to the warehouse.
+    // daily refresh: moves the "business day" label forward at the 3am boundary so Today's
+    // orders/wastage/dashboard start fresh, resets the order counter, AND automatically
+    // returns whatever is left "at stall" back into the warehouse (as if you'd packed up
+    // for the night) — logged as a normal "return" restock record per item, same as
+    // pressing "Return unsold" by hand, so it still shows up in Restock History.
     if(d.lastStallResetDate !== todayStr()){
       var hadPrevDate = !!d.lastStallResetDate;
       d.lastStallResetDate = todayStr();
@@ -867,9 +868,25 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       // an existing orderCounter on the very first load of old data.
       if(hadPrevDate){
         resetOrderCounterForNewDay(d);
+        autoReturnStallToWarehouse(d);
       }
     }
     return d;
+  }
+
+  // Moves everything still "at stall" into the warehouse at the 3am business-day rollover —
+  // one restock record per item (type:'return'), exactly like tapping "Return unsold"
+  // yourself, so nothing silently vanishes and it's still fully visible/undoable in
+  // Restock History. Only items with stock actually at the stall get a record.
+  function autoReturnStallToWarehouse(d){
+    var t = todayStr();
+    d.inventory.forEach(function(i){
+      if(i.qty > 0){
+        d.restocks.push({id:uid('r'), itemId:i.id, itemName:label(i), qty:i.qty, unit:i.unit, date:t, time:new Date().toISOString(), type:'return', auto:true});
+        i.warehouseQty += i.qty;
+        i.qty = 0;
+      }
+    });
   }
 
   // Starts order numbers fresh from 1 each new business day — UNLESS an order from
@@ -3152,6 +3169,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         var t = fmtTime(r.time);
         var icon = r.type === 'bring' ? '🚚' : (r.type === 'return' ? '↩' : '🛒');
         var actionLabel = r.type === 'bring' ? 'Brought to stall 带去摆摊' : (r.type === 'return' ? 'Returned to warehouse 退回仓库' : 'Bought from supplier 进货');
+        if(r.auto) actionLabel += ' · auto 3am 自动';
         var sign = r.type === 'return' ? '' : '+';
         return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
           '<div class="s">' + icon + ' ' + actionLabel + (t ? ' · ' + t : '') + '</div></div>' +
@@ -3289,13 +3307,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }, 20000);
 
   // Keep the "business day" (3am boundary) correct even if the app is left open overnight —
-  // checks once a minute and, if the day has moved on, refreshes the labels/lists to match.
-  // Never touches stall or warehouse quantities.
+  // checks once a minute and, if the day has moved on, refreshes the labels/lists to match,
+  // and automatically returns whatever's left at the stall back to the warehouse (see
+  // autoReturnStallToWarehouse) — same as runMigrations() does on a fresh page load.
   setInterval(function(){
     var d = todayStr();
     if(data.lastStallResetDate !== d){
       data.lastStallResetDate = d;
       resetOrderCounterForNewDay(data);
+      autoReturnStallToWarehouse(data);
       save();
       renderAll();
     }
