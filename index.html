@@ -631,11 +631,21 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       </div>
     </section>
 
-    <!-- SOLD TODAY -->
-    <section class="view" id="view-soldtoday">
+    <!-- SALES BY DATE -->
+    <section class="view" id="view-sales">
+      <div class="row2" style="margin-bottom:6px;">
+        <div class="field"><label for="salesFrom">From 从</label><input class="big-input" id="salesFrom" type="date"></div>
+        <div class="field"><label for="salesTo">To 到</label><input class="big-input" id="salesTo" type="date"></div>
+      </div>
+      <div class="qty-grid" style="grid-template-columns:repeat(2,1fr); margin-bottom:8px;">
+        <button class="btn-ghost" type="button" id="salesTodayBtn">📅 Today 今天</button>
+        <button class="btn-ghost" type="button" id="salesWeekBtn">🗓 This week 本周</button>
+        <button class="btn-ghost" type="button" id="salesMonthBtn">🗓 This month 本月</button>
+        <button class="btn-ghost" type="button" id="salesClearBtn">✕ Clear 清除</button>
+      </div>
       <div>
-        <div class="section-title">Sold today 今天卖了<span class="count" id="soldTodayCount">0</span></div>
-        <div class="list" id="soldTodayList" style="margin-top:8px;"></div>
+        <div class="section-title" id="salesRangeLabel">Sold today 今天卖了<span class="count" id="salesCount">0</span></div>
+        <div class="list" id="salesList" style="margin-top:8px;"></div>
       </div>
     </section>
   </main>
@@ -646,7 +656,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     <button class="tab-btn" data-view="warehouse"><span class="ic">🏬</span><span class="en">Warehouse</span><span class="zh">仓库</span></button>
     <button class="tab-btn" data-view="orders"><span class="ic">✎</span><span class="en">Orders</span><span class="zh">点单</span></button>
     <button class="tab-btn" data-view="serve"><span class="ic">☑</span><span class="en">Serve</span><span class="zh">上菜</span><span class="tab-badge" id="ticketBadge" hidden>0</span></button>
-    <button class="tab-btn" data-view="soldtoday"><span class="ic">📊</span><span class="en">Sold Today</span><span class="zh">今天卖了</span></button>
+    <button class="tab-btn" data-view="sales"><span class="ic">📊</span><span class="en">Sales</span><span class="zh">销量记录</span></button>
     <button class="tab-btn" data-view="wastage"><span class="ic">⚠</span><span class="en">Wastage</span><span class="zh">损耗</span></button>
     <button class="tab-btn" data-view="restock"><span class="ic">↻</span><span class="en">History</span><span class="zh">记录</span></button>
   </nav>
@@ -1310,7 +1320,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   // Builds the "Sold today" summary block for one item — total qty and revenue sold today,
   // plus a per-order breakdown so you can see exactly when it sold. Used by the dedicated
-  // "Sold Today" tab (renderSoldToday), which lists every item this way in one place instead
+  // "Sales" tab (renderSales), which lists every item this way in one place instead
   // of having to open each item on the Stall tab one at a time.
   function soldTodayHtml(item){
     var today = todayStr();
@@ -1334,36 +1344,67 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       '<div style="margin:0 0 4px;">' + rows + '</div>';
   }
 
-  // The "Sold Today" tab — every item that's sold at least once today, in one list, with
-  // total qty + revenue per item (e.g. "叉烧包 x 10 · RM 30") and the per-order breakdown one
-  // tap away. Only scans today's sale records, so it stays cheap and fast even as history
-  // piles up (same reasoning as renderOrderChips/renderTicket in renderAll()).
-  function renderSoldToday(){
+  // The "Sales" tab — pick a single date or a date range (native calendar pickers on the
+  // From/To fields) and see, for that range, every item sold with its total qty + revenue
+  // (e.g. "叉烧包 x 10 · RM 30"), plus the per-order breakdown one tap away. Leaving both
+  // dates empty shows all-time. Defaults to today on first load, matching the old "Sold
+  // Today" behavior this tab replaced.
+  function salesRangeDates(){
+    var fromEl = document.getElementById('salesFrom');
+    var toEl = document.getElementById('salesTo');
+    return {from: fromEl ? fromEl.value : '', to: toEl ? toEl.value : ''};
+  }
+  function renderSales(){
+    var fromEl = document.getElementById('salesFrom');
+    var toEl = document.getElementById('salesTo');
+    // Default to today the very first time this tab is opened (fields start empty in the HTML).
+    if(!fromEl.dataset.inited){
+      fromEl.dataset.inited = '1';
+      toEl.dataset.inited = '1';
+      var t = todayStr();
+      fromEl.value = t;
+      toEl.value = t;
+    }
+    var fromV = fromEl.value;
+    var toV = toEl.value;
+    var inRange = function(d){ return (!fromV || d >= fromV) && (!toV || d <= toV); };
+    var rangeSales = data.orders.filter(function(o){ return inRange(o.date); });
+
+    var labelEl = document.getElementById('salesRangeLabel');
     var today = todayStr();
-    var todaySales = data.orders.filter(function(o){ return o.date === today; });
+    var rangeText;
+    if(!fromV && !toV) rangeText = 'All time 全部';
+    else if(fromV === toV) rangeText = (fromV === today ? 'Today 今天' : fmtDate(fromV));
+    else rangeText = (fromV ? fmtDate(fromV) : '…') + ' → ' + (toV ? fmtDate(toV) : '…');
+
     var byItem = {};
     var order = [];
-    todaySales.forEach(function(o){
+    rangeSales.forEach(function(o){
       if(!byItem[o.item]){ byItem[o.item] = {name: o.item, qty: 0, revenue: 0, sales: []}; order.push(o.item); }
       byItem[o.item].qty += o.qty;
       byItem[o.item].revenue += o.qty * o.price;
       byItem[o.item].sales.push(o);
     });
-    var listEl = document.getElementById('soldTodayList');
-    var countEl = document.getElementById('soldTodayCount');
+    var listEl = document.getElementById('salesList');
+    var countEl = document.getElementById('salesCount');
     var items = order.map(function(name){ return byItem[name]; }).sort(function(a,b){ return b.qty - a.qty; });
-    countEl.textContent = String(items.length);
+    var totalQty = items.reduce(function(s,it){ return s + it.qty; }, 0);
+    var totalRevenue = items.reduce(function(s,it){ return s + it.revenue; }, 0);
+    labelEl.innerHTML = 'Sold — ' + esc(rangeText) + '<span class="count" id="salesCount">' + items.length + '</span>';
+    countEl = document.getElementById('salesCount');
     if(!items.length){
-      listEl.innerHTML = '<div class="empty-note">Nothing sold yet today. 今天还没卖出。</div>';
+      listEl.innerHTML = '<div class="empty-note">Nothing sold in this range. 这个日期范围内没有销售记录。</div>';
       return;
     }
-    listEl.innerHTML = items.map(function(it){
+    var summaryRow = '<div style="display:flex; justify-content:space-between; font-weight:700; padding:2px 2px 10px; font-size:.9rem;">' +
+      '<span>Total 总数量: ' + totalQty + '</span><span>' + fmt(totalRevenue) + '</span></div>';
+    listEl.innerHTML = summaryRow + items.map(function(it){
       var inv = findInv(it.name);
       var unit = inv ? inv.unit : '';
-      var rows = it.sales.slice().sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); }).map(function(o){
+      var rows = it.sales.slice().sort(function(a,b){ return (a.date+((a.time)||'')).localeCompare(b.date+((b.time)||'')); }).map(function(o){
         var t = o.time ? new Date(o.time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
         return '<div style="display:flex; justify-content:space-between; font-size:.85rem; padding:4px 0; border-bottom:1px solid var(--line);">' +
-          '<span>' + t + (o.orderName ? ' · Order ' + esc(o.orderName) : '') + '</span>' +
+          '<span>' + fmtDate(o.date) + (t ? ' ' + t : '') + (o.orderName ? ' · Order ' + esc(o.orderName) : '') + '</span>' +
           '<span>×' + o.qty + ' · ' + fmt(o.qty * o.price) + '</span>' +
         '</div>';
       }).join('');
@@ -3052,6 +3093,41 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   document.getElementById('dashFrom').addEventListener('change', renderDashboard);
   document.getElementById('dashTo').addEventListener('change', renderDashboard);
 
+  document.getElementById('salesFrom').addEventListener('change', renderSales);
+  document.getElementById('salesTo').addEventListener('change', renderSales);
+  document.getElementById('salesTodayBtn').addEventListener('click', function(){
+    var t = todayStr();
+    document.getElementById('salesFrom').value = t;
+    document.getElementById('salesTo').value = t;
+    renderSales();
+  });
+  // "This week" — Monday through today (business-day date, same 3am cutoff as the rest of
+  // the app), and "This month" — the 1st through today. Both use local date math on the
+  // already-shifted todayStr() value so they line up with how every other date in the app
+  // (order records, dashboard ranges) is bucketed.
+  document.getElementById('salesWeekBtn').addEventListener('click', function(){
+    var t = todayStr();
+    var d = new Date(t + 'T00:00:00');
+    var dow = d.getDay(); // 0=Sun..6=Sat
+    var diffToMonday = (dow === 0) ? 6 : dow - 1;
+    var monday = new Date(d.getTime() - diffToMonday * 86400000);
+    var y = monday.getFullYear(), m = String(monday.getMonth()+1).padStart(2,'0'), day = String(monday.getDate()).padStart(2,'0');
+    document.getElementById('salesFrom').value = y + '-' + m + '-' + day;
+    document.getElementById('salesTo').value = t;
+    renderSales();
+  });
+  document.getElementById('salesMonthBtn').addEventListener('click', function(){
+    var t = todayStr();
+    document.getElementById('salesFrom').value = t.slice(0,7) + '-01';
+    document.getElementById('salesTo').value = t;
+    renderSales();
+  });
+  document.getElementById('salesClearBtn').addEventListener('click', function(){
+    document.getElementById('salesFrom').value = '';
+    document.getElementById('salesTo').value = '';
+    renderSales();
+  });
+
   // ---- restock history ----
   function renderRestockHistory(){
     var list = document.getElementById('restockList');
@@ -3181,8 +3257,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       renderWastage();
     } else if(view === 'restock'){
       renderRestockHistory();
-    } else if(view === 'soldtoday'){
-      renderSoldToday();
+    } else if(view === 'sales'){
+      renderSales();
     }
   }
 
