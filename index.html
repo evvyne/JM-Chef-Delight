@@ -477,10 +477,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <input type="file" id="restoreFileInput" accept="application/json" hidden>
       </div>
 
-      <div class="danger-zone">
-        <span class="txt">Wipe today's orders, wastage and restock history. Your item list and stock stay untouched. 清除订单、损耗、进货记录,不会动到你的品项和库存。</span>
-        <button class="btn-danger" id="clearDataBtn" type="button">Clear activity 清除记录</button>
-      </div>
     </section>
 
     <!-- INVENTORY -->
@@ -2633,8 +2629,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   document.getElementById('itemLookup').addEventListener('change', updateLookupResult);
 
-  // ---- backup / restore — a real file the user can save/share, on top of the quiet
-  // local safety copy kept before "Clear activity" ----
+  // ---- backup / restore — a real file the user can save/share ----
   document.getElementById('backupDataBtn').addEventListener('click', function(){
     try{
       var payload = JSON.stringify(realData, null, 2);
@@ -2685,23 +2680,6 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       alert('Could not read that file. 无法读取这个档案。');
     };
     reader.readAsText(file);
-  });
-
-  document.getElementById('clearDataBtn').addEventListener('click', function(){
-    if(!confirm('⚠ This deletes ALL sales, wastage and restock history — press "⬇ Backup now" above first if you want to keep a copy you can restore later. Your item list and stock stay untouched.\n\n⚠ 这会删除全部的订单、损耗、进货记录 — 如果想留底,先按上面的「⬇ 立即备份」,以后可以还原。你的品项清单和库存不会被动到。\n\nContinue? 确定继续？')) return;
-    // Keep one quiet local safety copy of everything right before wiping it — there's no
-    // restore button for this (out of scope), but it means the data isn't truly gone if
-    // it's ever needed to manually recover from.
-    try{ localStorage.setItem(STORE_KEY + '_last_clear_backup', JSON.stringify(data)); }catch(e){}
-    data.orders = [];
-    data.wastage = [];
-    data.restocks = [];
-    data.openOrders = [];
-    data.orderCounter = 0;
-    data.activeOrderId = null;
-    save();
-    renderAll();
-    flash('✓ Activity cleared — your items are untouched');
   });
 
   // ---- wastage logic ----
@@ -2802,6 +2780,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
 
   // ---- dashboard ----
   var dashRangeValue = 'today';
+  // How many days of "Recent activity" are currently shown on the Dashboard — starts small
+  // and grows only when "Show older activity" is tapped, so opening Dashboard never has to
+  // build DOM for the truck's entire history at once (see renderDashboard's recentList).
+  var RECENT_ACTIVITY_PAGE_SIZE = 14;
+  var recentActivityShowCount = RECENT_ACTIVITY_PAGE_SIZE;
   function dashRangeOptionsHtml(){
     var dates = {};
     data.orders.forEach(function(o){ dates[o.date] = true; });
@@ -2998,8 +2981,14 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         '<div class="right"><span class="amt ' + (ev.amt>=0?'good':'bad') + '">' + (ev.amt>=0?'':'-') + fmt(Math.abs(ev.amt)) + '</span></div></div>';
     }
 
+    // Only build DOM for a bounded window of days at a time — with dateOrder covering
+    // EVERY day the truck has ever operated, rendering all of it every time Dashboard opens
+    // is exactly the kind of all-time-history cost that made the app feel stuck/frozen after
+    // enough history piled up (same class of bug as the original renderAll() slowdown, just
+    // inside a single tab this time). "Show older" reveals more only when actually asked for.
+    var visibleDates = dateOrder.slice(0, recentActivityShowCount);
     var recEl = document.getElementById('recentList');
-    recEl.innerHTML = dateOrder.length ? dateOrder.map(function(dt){
+    var listHtml = dateOrder.length ? visibleDates.map(function(dt){
       var bucket = eventsByDate[dt];
       var evts = bucket.events.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
       var dayTotal = evts.reduce(function(s, ev){ return s + ev.amt; }, 0);
@@ -3010,6 +2999,17 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         '<div style="padding:0 16px 12px;">' + rowsHtml + '</div>' +
       '</details>';
     }).join('') : '<div class="empty-note">No activity yet — log a sale or restock to get started.</div>';
+    if(dateOrder.length > visibleDates.length){
+      listHtml += '<button class="btn-ghost" type="button" id="recentShowMoreBtn" style="width:100%; margin-top:4px;">Show older activity 显示更旧的记录 (' + (dateOrder.length - visibleDates.length) + ' more days 更多天)</button>';
+    }
+    recEl.innerHTML = listHtml;
+    var showMoreBtn = document.getElementById('recentShowMoreBtn');
+    if(showMoreBtn){
+      showMoreBtn.addEventListener('click', function(){
+        recentActivityShowCount += RECENT_ACTIVITY_PAGE_SIZE;
+        renderDashboard();
+      });
+    }
   }
 
   // Cancels a whole order straight from Dashboard → Recent activity — for when it was
@@ -3258,25 +3258,37 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   // rebuild their lists from EVERY order/wastage/restock record ever logged, so they get
   // slower the longer the app has been used. Calling only the tab actually on screen is
   // what keeps tapping through Serve fast no matter how much history has piled up.
+  // If something inside one tab's render throws (e.g. a bad/unexpected data value), this
+  // stops it from silently breaking EVERY other button on the page — without this guard, an
+  // uncaught error here aborts the click handler that called it, so the tab never finishes
+  // switching and the app can look "stuck" until the page is reloaded. Instead we log it,
+  // show a small toast, and let the rest of the app keep working.
+  function safeRender(fn, label){
+    try{ fn(); }
+    catch(err){
+      console.error('Render error in ' + label + ':', err);
+      flash('⚠ ' + label + ' had a problem loading — try again or tell your daughter 加载出错，可以再试一次或告诉女儿');
+    }
+  }
   function renderViewSpecific(view){
     if(view === 'dashboard'){
-      renderDashboard();
+      safeRender(renderDashboard, 'Dashboard');
     } else if(view === 'inventory'){
-      renderInventoryGrid();
+      safeRender(renderInventoryGrid, 'Stall');
     } else if(view === 'warehouse'){
-      renderWarehouseGrid();
+      safeRender(renderWarehouseGrid, 'Warehouse');
     } else if(view === 'orders'){
-      renderOrders();
-      renderMenuDatalist();
-      renderItemLookup();
-      renderQuickGrid();
-      renderStockLeftList();
+      safeRender(renderOrders, 'Orders');
+      safeRender(renderMenuDatalist, 'Orders');
+      safeRender(renderItemLookup, 'Orders');
+      safeRender(renderQuickGrid, 'Orders');
+      safeRender(renderStockLeftList, 'Orders');
     } else if(view === 'wastage'){
-      renderWastage();
+      safeRender(renderWastage, 'Wastage');
     } else if(view === 'restock'){
-      renderRestockHistory();
+      safeRender(renderRestockHistory, 'Restock History');
     } else if(view === 'sales'){
-      renderSales();
+      safeRender(renderSales, 'Sales');
     }
   }
 
@@ -3284,8 +3296,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     // Cheap and cross-tab: the Serve list/badge only scans currently-open orders (usually
     // a handful), and the order-chip row is what keeps the Orders tab's locked/unlocked
     // quick-sell grid correct — both stay fast regardless of how much history exists.
-    renderOrderChips();
-    renderTicket();
+    safeRender(renderOrderChips, 'Order chips');
+    safeRender(renderTicket, 'Serve list');
     renderViewSpecific(currentViewName());
   }
   renderAll();
