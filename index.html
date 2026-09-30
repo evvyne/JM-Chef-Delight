@@ -446,6 +446,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         <div class="field"><label for="dashFrom">From 从</label><input class="big-input" id="dashFrom" type="date"></div>
         <div class="field"><label for="dashTo">To 到</label><input class="big-input" id="dashTo" type="date"></div>
       </div>
+      <div id="dashArchiveNote"></div>
       <div class="summary-grid">
         <div class="tile"><div class="label" id="revenueLabel">Revenue today 今日营收</div><div class="value" id="sumRevenue">—</div></div>
         <div class="tile"><div class="label" id="costLabel">Cost today 今日成本</div><div class="value" id="sumCost">—</div></div>
@@ -748,10 +749,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
         mkInv("i12","Red Bean Black Glutinous","红豆糯米","TongSui","bowl",0,0,null,null),
         mkInv("i13","Sweet Potato","番薯","TongSui","bowl",0,0,null,null)
       ],
-      orders: [
-        {id:"o1", date:today, time:now, item:"Charsiu Pau 叉烧包", qty:4, price:3, cost:1.8},
-        {id:"o2", date:today, time:now, item:"Charsiu Pau 叉烧包", qty:2, price:3, cost:1.8}
-      ],
+      orders: [],
       wastage: [],
       restocks: [],
       openOrders: [],
@@ -902,12 +900,17 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   var testMode = false;
   var realData;
   var localLoadFailed = false;
+  // True when this iPad has no saved data of its own (first install, or the browser
+  // cleared its storage). In that case the cloud copy MUST be loaded before anything is
+  // recorded — otherwise a near-empty copy could later be uploaded over the real one.
+  var needsCloudFirst = false;
   try{
     var raw = localStorage.getItem(STORE_KEY);
     if(raw){
       realData = JSON.parse(raw);
     } else {
       realData = seedData();
+      needsCloudFirst = true;
     }
   }catch(e){
     // Existing saved data couldn't be read (corrupted or unreadable) — fall back to a
@@ -915,6 +918,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     // than silently showing what looks like empty/demo data as if it were real.
     realData = seedData();
     localLoadFailed = true;
+    needsCloudFirst = true;
   }
   realData = runMigrations(realData);
   var data = realData;
@@ -979,9 +983,15 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     flash('✓ Practice data reset 练习资料已重置');
   }
   document.getElementById('testModeToggle').addEventListener('click', function(){
-    if(testMode){ exitTestMode(); } else { enterTestMode(); }
+    if(testMode){
+      if(!confirm('Exit practice mode? Going back to your real records.\n\n退出练习模式？要回到真的资料了。')) return;
+      exitTestMode();
+    } else { enterTestMode(); }
   });
-  document.getElementById('testModeExit').addEventListener('click', exitTestMode);
+  document.getElementById('testModeExit').addEventListener('click', function(){
+    if(!confirm('Exit practice mode? Going back to your real records.\n\n退出练习模式？要回到真的资料了。')) return;
+    exitTestMode();
+  });
   document.getElementById('testModeReset').addEventListener('click', resetTestData);
   updateTestBanner();
 
@@ -990,14 +1000,116 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   // offline load; Supabase is the durable backup + cross-device copy. ----
   var SUPABASE_URL = 'https://rpvohvdtynkkuyxjjncj.supabase.co';
   var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJwdm9odmR0eW5ra3V5eGpqbmNqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTU1MzIsImV4cCI6MjEwNDAzMTUzMn0.7T8ZyYxkhvAjdTNqPfJJ9hH0SMbLatM8AjGpW7DNSAU';
-  var sb = (window.supabase && window.supabase.createClient)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    : null;
+  var SUPABASE_LIB_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
+  var sb = null;
+  var sbLoading = false;
+  // Creates the cloud client. If the library couldn't load (e.g. the app was opened with
+  // no internet), it quietly tries to load it again, so syncing can resume later in the
+  // same session instead of staying off until the app is reopened.
+  function ensureSb(){
+    if(sb) return true;
+    if(window.supabase && window.supabase.createClient){
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      return true;
+    }
+    if(!sbLoading && typeof document !== 'undefined'){
+      sbLoading = true;
+      var s = document.createElement('script');
+      s.src = SUPABASE_LIB_URL;
+      s.onload = function(){ sbLoading = false; if(ensureSb()) pullFromCloud(); };
+      s.onerror = function(){ sbLoading = false; if(s.parentNode) s.parentNode.removeChild(s); };
+      document.head.appendChild(s);
+    }
+    return false;
+  }
+  ensureSb();
 
   var cloudSyncStatusEl = null;
   function setCloudStatus(text){
     if(!cloudSyncStatusEl) cloudSyncStatusEl = document.getElementById('cloudSyncStatus');
     if(cloudSyncStatusEl) cloudSyncStatusEl.textContent = text;
+  }
+
+  // Writes the real data to this iPad's storage. If the iPad refuses (storage full), say
+  // so loudly instead of silently losing the local copy.
+  var storageWarned = false;
+  function persistLocal(){
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(realData));
+      storageWarned = false;
+      return true;
+    }catch(e){
+      if(!storageWarned){
+        storageWarned = true;
+        setCloudStatus('⚠ iPad storage full — only the cloud copy is being updated. 储存空间满了，只能存到云端，请联络女儿');
+        if(typeof flash === 'function') flash('⚠ iPad storage full 储存空间满了 — please contact your daughter 请联络女儿');
+      }
+      return false;
+    }
+  }
+
+  // Total number of records (sales, wastage, stock moves) a copy of the data holds,
+  // counting ones already moved to the monthly archive. Used to spot a copy that has
+  // suddenly lost most of its history before it can overwrite a good copy.
+  function recordTotal(d){
+    if(!d) return 0;
+    var a = d.archivedCounts || {};
+    return (d.orders || []).length + (d.wastage || []).length + (d.restocks || []).length +
+      (a.orders || 0) + (a.wastage || 0) + (a.restocks || 0);
+  }
+  function looksMuchSmaller(n, than){
+    return than != null && (than - n) >= 15 && n < than * 0.7;
+  }
+  var lastCloudTotal = null;   // record count of the cloud copy, from the latest pull/push
+  var allowShrinkOnce = false; // set only by an intentional "Restore from backup"
+  var syncBlocked = false;
+
+  function setSyncBlocked(on){
+    syncBlocked = on;
+    var el = document.getElementById('syncBlockedBanner');
+    if(!el && on){
+      el = document.createElement('div');
+      el.id = 'syncBlockedBanner';
+      el.style.cssText = 'background:#c62828; color:#fff; padding:10px 14px; font-size:.82rem; font-weight:700; line-height:1.5; text-align:center;';
+      el.innerHTML = '⚠ Sync paused — the data on this iPad looks incomplete, so it was NOT uploaded. The cloud copy is safe. Keep selling as normal and contact your daughter.<br>⚠ 已暂停同步：这台 iPad 的资料好像不完整，所以没有上传，云端的资料是安全的。可以照常卖，请联络女儿。';
+      var anchor = document.getElementById('cloudSyncStatus');
+      if(anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor);
+      else document.body.insertBefore(el, document.body.firstChild);
+    }
+    if(el) el.style.display = on ? '' : 'none';
+  }
+
+  // Full-screen notice shown when this iPad has no data of its own and the cloud copy
+  // hasn't been loaded yet — nothing can be recorded until it's back.
+  function showCloudGate(state){
+    var el = document.getElementById('cloudGate');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'cloudGate';
+      el.style.cssText = 'position:fixed; inset:0; z-index:300; background:rgba(250,246,238,.97); display:flex; align-items:center; justify-content:center; padding:24px; text-align:center;';
+      document.body.appendChild(el);
+    }
+    var offline = state === 'offline';
+    el.innerHTML = '<div style="max-width:420px;">' +
+      '<div style="font-size:2.4rem;">' + (offline ? '📶' : '☁️') + '</div>' +
+      '<div style="font-weight:800; font-size:1.15rem; margin:8px 0;">' + (offline
+        ? 'Please connect to the internet<br>请先连接网络'
+        : 'Loading your data from the cloud…<br>正在从云端取回资料…') + '</div>' +
+      '<div style="color:#7a6f5f; font-size:.9rem; line-height:1.6; margin-bottom:16px;">' + (offline
+        ? 'This iPad has no saved data right now, so it needs the internet to get your records back before you can start. 这台 iPad 现在没有资料，要先上网把记录拿回来才能开始用。<br>If this keeps happening, contact your daughter. 如果一直这样，请联络女儿。'
+        : 'Please wait a moment. 请稍等一下。') + '</div>' +
+      (offline ? '<button type="button" id="cloudGateRetry" style="padding:14px 24px; border-radius:12px; border:none; background:#c0501f; color:#fff; font-weight:800; font-size:1rem;">↻ Try again 再试一次</button>' +
+        '<div style="margin-top:14px;"><button type="button" id="cloudGateRestore" style="background:none; border:none; color:#7a6f5f; text-decoration:underline; font-size:.85rem;">Restore from a backup file instead 改用备份档还原</button></div>' : '') +
+      '</div>';
+    el.style.display = 'flex';
+    var btn = document.getElementById('cloudGateRetry');
+    if(btn) btn.addEventListener('click', function(){ showCloudGate('loading'); pullFromCloud(); });
+    var rbtn = document.getElementById('cloudGateRestore');
+    if(rbtn) rbtn.addEventListener('click', function(){ document.getElementById('restoreFileInput').click(); });
+  }
+  function hideCloudGate(){
+    var el = document.getElementById('cloudGate');
+    if(el) el.style.display = 'none';
   }
 
   // Tracks whether the last cloud attempt worked, so a flash toast only pops up on the
@@ -1013,20 +1125,61 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(typeof flash === 'function') flash('✓ Back online — synced 网络恢复了，已同步');
     }
   }
+  var OFFLINE_SAVE_MSG = '⚠ No internet connection — still saved on this device, will sync once back online\n没有网络连接 — 已保存在本机，恢复网络后会自动同步';
+
+  function fetchCloudCopy(){
+    return sb.from('app_state').select('data, updated_at').eq('id', 1).maybeSingle().then(function(res){
+      if(res.error) throw res.error;
+      return res.data || null;
+    });
+  }
+
   var pushTimer = null;
+  var pushInFlight = false;
+  var pushAgain = false;
   function pushToCloudNow(){
-    setCloudStatus('Saving to cloud… 正在同步…');
-    var savedAt = realData.lastSavedAt || new Date().toISOString();
-    return sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
-      setCloudStatus(res.error ? '⚠ Cloud sync failed 云端同步失败' : '✓ Synced to cloud 已同步');
-      noteCloudResult(!res.error, '⚠ No internet connection — still saved on this device, will sync once back online\n没有网络连接 — 已保存在本机，恢复网络后会自动同步');
+    pushTimer = null;
+    if(testMode || needsCloudFirst) return Promise.resolve();
+    if(!ensureSb()) return Promise.resolve();
+    if(pushInFlight){ pushAgain = true; return Promise.resolve(); }
+    pushInFlight = true;
+    var localN = recordTotal(realData);
+    var check = (lastCloudTotal == null)
+      ? fetchCloudCopy().then(function(row){ return row && row.data ? recordTotal(row.data) : 0; })
+      : Promise.resolve(lastCloudTotal);
+    return check.then(function(cloudN){
+      if(!allowShrinkOnce && looksMuchSmaller(localN, cloudN)){
+        lastCloudTotal = cloudN;
+        setSyncBlocked(true);
+        setCloudStatus('⚠ Sync paused 已暂停同步');
+        return;
+      }
+      setCloudStatus('Saving to cloud… 正在同步…');
+      var savedAt = realData.lastSavedAt || new Date().toISOString();
+      return sb.from('app_state').upsert({id:1, data:realData, updated_at:savedAt}).then(function(res){
+        if(res.error){
+          setCloudStatus('⚠ Cloud sync failed 云端同步失败');
+          noteCloudResult(false, OFFLINE_SAVE_MSG);
+          return;
+        }
+        allowShrinkOnce = false;
+        lastCloudTotal = localN;
+        setSyncBlocked(false);
+        setCloudStatus('✓ Synced to cloud 已同步');
+        noteCloudResult(true);
+        maybeDailyBackup();
+        maybeArchiveOldMonths();
+      });
     }).catch(function(){
       setCloudStatus('⚠ Cloud sync failed 云端同步失败');
-      noteCloudResult(false, '⚠ No internet connection — still saved on this device, will sync once back online\n没有网络连接 — 已保存在本机，恢复网络后会自动同步');
+      noteCloudResult(false, OFFLINE_SAVE_MSG);
+    }).then(function(){
+      pushInFlight = false;
+      if(pushAgain){ pushAgain = false; pushToCloud(); }
     });
   }
   function pushToCloud(){
-    if(!sb || testMode) return;
+    if(testMode || needsCloudFirst) return;
     clearTimeout(pushTimer);
     pushTimer = setTimeout(pushToCloudNow, 800);
   }
@@ -1034,9 +1187,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   // send it immediately instead of losing it — this is the one point where a change made
   // right before closing the app could otherwise never reach the cloud.
   function flushPendingCloudPush(){
-    if(!sb || testMode || pushTimer == null) return;
+    if(testMode || pushTimer == null) return;
     clearTimeout(pushTimer);
-    pushTimer = null;
     pushToCloudNow();
   }
   // Immediate feedback the moment the device itself loses/regains internet — this fires
@@ -1046,52 +1198,200 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     noteCloudResult(false, '⚠ No internet connection — app still works, will sync once back online\n没有网络连接 — App 还是可以用，恢复网络后会自动同步');
   });
   window.addEventListener('online', function(){
-    if(!testMode) pushToCloud();
+    if(needsCloudFirst){ pullFromCloud(); return; }
+    if(!testMode) pullFromCloud();
   });
   window.addEventListener('pagehide', flushPendingCloudPush);
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState === 'hidden') flushPendingCloudPush();
   });
 
-  // Pulling from the cloud used to always overwrite local data, which could silently
-  // discard very recent changes if the last push hadn't finished before the app was
-  // closed/reloaded (the push is debounced by ~800ms). Now we compare timestamps —
-  // whichever copy (local or cloud) was actually saved more recently wins, and if
-  // local wins we re-push it so the cloud catches up instead of staying stale.
+  // Whichever copy (this iPad or the cloud) was saved more recently wins — EXCEPT that a
+  // copy which has suddenly lost most of its records never replaces a fuller one, and an
+  // iPad with no data of its own always takes the cloud copy first.
+  var pullInFlight = false;
   function pullFromCloud(){
-    if(!sb) return;
+    if(!ensureSb()){
+      if(needsCloudFirst) showCloudGate('offline');
+      return Promise.resolve();
+    }
+    if(pullInFlight) return Promise.resolve();
+    pullInFlight = true;
     setCloudStatus('Loading from cloud… 正在读取云端…');
-    sb.from('app_state').select('data, updated_at').eq('id', 1).maybeSingle().then(function(res){
-      if(res.error){
-        setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料');
-        noteCloudResult(false, '⚠ No internet connection — using the copy saved on this device\n没有网络连接 — 正在使用本机保存的资料');
+    return fetchCloudCopy().then(function(row){
+      noteCloudResult(true);
+      var cloud = row && row.data;
+      if(!cloud){
+        // nothing in the cloud yet — this really is a brand-new setup
+        lastCloudTotal = 0;
+        if(needsCloudFirst){ needsCloudFirst = false; hideCloudGate(); }
+        setCloudStatus('✓ Synced to cloud 已同步');
+        pushToCloud();
         return;
       }
-      noteCloudResult(true);
-      if(res.data && res.data.data){
-        var cloudTime = res.data.updated_at ? new Date(res.data.updated_at).getTime() : 0;
-        var localTime = realData.lastSavedAt ? new Date(realData.lastSavedAt).getTime() : 0;
-        if(cloudTime > localTime){
-          realData = runMigrations(res.data.data);
-          try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(e){}
-          if(!testMode){
-            data = realData;
-            renderAll();
-          }
-          setCloudStatus('✓ Synced to cloud 已同步');
-        } else {
-          // local copy is newer (or equal) — keep it, and make sure the cloud catches up
-          setCloudStatus('✓ Synced to cloud 已同步');
-          pushToCloud();
-        }
+      var cloudN = recordTotal(cloud);
+      lastCloudTotal = cloudN;
+      if(needsCloudFirst){
+        realData = runMigrations(cloud);
+        persistLocal();
+        needsCloudFirst = false;
+        localLoadFailed = false;
+        hideCloudGate();
+        if(!testMode){ data = realData; renderAll(); }
+        setCloudStatus('✓ Synced to cloud 已同步');
+        if(typeof flash === 'function') flash('✓ Your data was loaded from the cloud 已从云端取回资料');
+        return;
+      }
+      var cloudTime = row.updated_at ? new Date(row.updated_at).getTime() : 0;
+      var localTime = realData.lastSavedAt ? new Date(realData.lastSavedAt).getTime() : 0;
+      var localN = recordTotal(realData);
+      if(cloudTime > localTime && !looksMuchSmaller(cloudN, localN)){
+        realData = runMigrations(cloud);
+        persistLocal();
+        if(!testMode){ data = realData; renderAll(); }
+        setCloudStatus('✓ Synced to cloud 已同步');
       } else {
-        // no cloud copy yet — push what we have locally as the first cloud copy
+        // this iPad's copy is newer (or the cloud copy looks cut short) — keep ours and
+        // make sure the cloud catches up
+        setCloudStatus('✓ Synced to cloud 已同步');
         pushToCloud();
       }
     }).catch(function(){
       setCloudStatus('⚠ Could not reach cloud — using local copy 无法连接云端,使用本地资料');
       noteCloudResult(false, '⚠ No internet connection — using the copy saved on this device\n没有网络连接 — 正在使用本机保存的资料');
-    });
+      if(needsCloudFirst) showCloudGate('offline');
+    }).then(function(){ pullInFlight = false; });
+  }
+
+  // ---- daily cloud backup: one full copy per day in a rolling set of 30 slots, so even
+  // if the main copy were ever overwritten, yesterday's is still there. Needs the
+  // app_backups table in Supabase; if it isn't set up, this quietly does nothing. ----
+  var backupInFlight = false, backupUnavailable = false;
+  function maybeDailyBackup(){
+    if(testMode || needsCloudFirst || syncBlocked || backupInFlight || backupUnavailable || !sb) return;
+    var day = todayStr();
+    if(realData.lastCloudBackupDay === day) return;
+    var slot = Math.floor(Date.parse(day + 'T00:00:00Z') / 86400000) % 30;
+    backupInFlight = true;
+    sb.from('app_backups').upsert({slot:slot, day:day, saved_at:new Date().toISOString(), data:realData}).then(function(res){
+      backupInFlight = false;
+      if(res.error){ backupUnavailable = true; return; }
+      realData.lastCloudBackupDay = day;
+      persistLocal();
+    }).catch(function(){ backupInFlight = false; });
+  }
+
+  // ---- monthly archive: keeps only the current month and the two before it on the
+  // iPad; older months are moved to the app_archive table (one row per month). A month
+  // is only removed from the iPad AFTER the cloud confirms it has it. ----
+  var ARCHIVE_KEEP_MONTHS = 3;
+  var archiveInFlight = false, archiveUnavailable = false;
+  function monthKey(dateStr){ return String(dateStr || '').slice(0, 7); }
+  function oldestKeptMonth(){
+    var t = todayStr();
+    var y = parseInt(t.slice(0,4), 10), m = parseInt(t.slice(5,7), 10) - (ARCHIVE_KEEP_MONTHS - 1);
+    while(m < 1){ m += 12; y -= 1; }
+    return y + '-' + String(m).padStart(2, '0');
+  }
+  function maybeArchiveOldMonths(){
+    if(testMode || needsCloudFirst || syncBlocked || archiveInFlight || archiveUnavailable || !sb) return;
+    var day = todayStr();
+    if(realData.lastArchiveCheckDay === day) return;
+    var cutoff = oldestKeptMonth();
+    // sales still attached to an open order stay on the iPad
+    var openSaleIds = {};
+    (realData.openOrders || []).forEach(function(o){ (o.lines || []).forEach(function(l){ if(l.saleId) openSaleIds[l.saleId] = true; }); });
+    var byMonth = {};
+    function collect(list, kind){
+      (realData[list] || []).forEach(function(r){
+        var mk = monthKey(r.date);
+        if(!mk || mk >= cutoff) return;
+        if(kind === 'orders' && openSaleIds[r.id]) return;
+        (byMonth[mk] = byMonth[mk] || {orders:[], wastage:[], restocks:[]})[kind].push(r);
+      });
+    }
+    collect('orders', 'orders'); collect('wastage', 'wastage'); collect('restocks', 'restocks');
+    var months = Object.keys(byMonth).sort();
+    if(!months.length){ realData.lastArchiveCheckDay = day; persistLocal(); return; }
+    archiveInFlight = true;
+    var m = months[0];
+    var local = byMonth[m];
+    sb.from('app_archive').select('data').eq('month', m).maybeSingle().then(function(res){
+      if(res.error) throw res.error;
+      var existing = (res.data && res.data.data) || {orders:[], wastage:[], restocks:[]};
+      var merged = {month:m, orders:[], wastage:[], restocks:[]};
+      var newCounts = {orders:0, wastage:0, restocks:0};
+      ['orders','wastage','restocks'].forEach(function(k){
+        var seen = {};
+        (existing[k] || []).forEach(function(r){ seen[r.id] = true; merged[k].push(r); });
+        local[k].forEach(function(r){ if(!seen[r.id]){ merged[k].push(r); newCounts[k]++; } });
+      });
+      return sb.from('app_archive').upsert({month:m, data:merged, updated_at:new Date().toISOString()}).then(function(res2){
+        if(res2.error) throw res2.error;
+        // the cloud has it — now it's safe to remove this month from the iPad
+        var ids = {};
+        ['orders','wastage','restocks'].forEach(function(k){ local[k].forEach(function(r){ ids[r.id] = true; }); });
+        realData.orders = realData.orders.filter(function(r){ return !ids[r.id]; });
+        realData.wastage = realData.wastage.filter(function(r){ return !ids[r.id]; });
+        realData.restocks = realData.restocks.filter(function(r){ return !ids[r.id]; });
+        var ac = realData.archivedCounts = realData.archivedCounts || {orders:0, wastage:0, restocks:0};
+        ac.orders = (ac.orders || 0) + newCounts.orders;
+        ac.wastage = (ac.wastage || 0) + newCounts.wastage;
+        ac.restocks = (ac.restocks || 0) + newCounts.restocks;
+        realData.archivedMonths = realData.archivedMonths || [];
+        if(realData.archivedMonths.indexOf(m) === -1){ realData.archivedMonths.push(m); realData.archivedMonths.sort(); }
+        archiveCache[m] = merged;
+        archiveInFlight = false;
+        if(!testMode) data = realData;
+        save();          // uploads the slimmer copy (its record total still counts the archive)
+        renderAll();
+      });
+    }).catch(function(){ archiveInFlight = false; archiveUnavailable = true; });
+  }
+
+  // Archived months are fetched from the cloud only when a report actually needs them.
+  var archiveCache = {};
+  var archiveLoading = {};
+  var archiveLoadFailed = {};
+  function archivedMonthsBetween(fromDate, toDate){
+    var list = (data.archivedMonths || []);
+    var fm = fromDate ? monthKey(fromDate) : '0000-00', tm = toDate ? monthKey(toDate) : '9999-99';
+    return list.filter(function(m){ return m >= fm && m <= tm; });
+  }
+  // Returns the archived months in range that aren't available yet, and starts loading them.
+  function ensureArchiveLoaded(months){
+    var missing = months.filter(function(m){ return !archiveCache[m]; });
+    // don't retry a month that just failed (e.g. no internet) more than every 30s —
+    // otherwise every re-render would fire another request straight away
+    var nowMs = Date.now();
+    var toLoad = missing.filter(function(m){ return !archiveLoading[m] && !(archiveLoadFailed[m] && nowMs - archiveLoadFailed[m] < 30000); });
+    if(toLoad.length && ensureSb()){
+      toLoad.forEach(function(m){ archiveLoading[m] = true; });
+      sb.from('app_archive').select('month, data').in('month', toLoad).then(function(res){
+        toLoad.forEach(function(m){ archiveLoading[m] = false; });
+        if(res.error) throw res.error;
+        (res.data || []).forEach(function(row){ archiveCache[row.month] = row.data; archiveLoadFailed[row.month] = 0; });
+        // a month the cloud doesn't have: treat as empty rather than asking again forever
+        toLoad.forEach(function(m){ if(!archiveCache[m]) archiveCache[m] = {orders:[], wastage:[], restocks:[]}; });
+        renderViewSpecific(currentViewName());
+      }).catch(function(){
+        toLoad.forEach(function(m){ archiveLoading[m] = false; archiveLoadFailed[m] = Date.now(); });
+        renderViewSpecific(currentViewName());
+      });
+    }
+    return missing;
+  }
+  function historyList(kind, months){
+    var out = (data[kind] || []).slice();
+    (months || []).forEach(function(m){ if(archiveCache[m]) out = out.concat(archiveCache[m][kind] || []); });
+    return out;
+  }
+  function archiveNoteHtml(missing){
+    if(!missing.length) return '';
+    var loading = missing.some(function(m){ return archiveLoading[m] || !archiveLoadFailed[m]; });
+    return '<div class="muted-small" style="margin:4px 0 8px; color:#b7791f;">📦 ' + (loading
+      ? 'Loading older months from the cloud… 正在从云端载入旧月份资料…'
+      : 'Older months (' + missing.join(', ') + ') are stored in the cloud and need internet to show. 旧月份的资料存在云端，要有网络才看得到。') + '</div>';
   }
 
   var save = function(){
@@ -1099,9 +1399,11 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       try{ localStorage.setItem(TEST_STORE_KEY, JSON.stringify(data)); }catch(e){}
       return;
     }
+    // An iPad with no data of its own must not save anything until the cloud copy is back.
+    if(needsCloudFirst) return;
     data.lastSavedAt = new Date().toISOString();
     realData = data;
-    try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
+    persistLocal();
     pushToCloud();
   };
 
@@ -1381,7 +1683,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var fromV = fromEl.value;
     var toV = toEl.value;
     var inRange = function(d){ return (!fromV || d >= fromV) && (!toV || d <= toV); };
-    var rangeSales = data.orders.filter(function(o){ return inRange(o.date); });
+    var salesMonths = archivedMonthsBetween(fromV, toV);
+    var salesMissing = ensureArchiveLoaded(salesMonths);
+    var rangeSales = historyList('orders', salesMonths).filter(function(o){ return inRange(o.date); });
 
     var labelEl = document.getElementById('salesRangeLabel');
     var today = todayStr();
@@ -1390,13 +1694,18 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     else if(fromV === toV) rangeText = (fromV === today ? 'Today 今天' : fmtDate(fromV));
     else rangeText = (fromV ? fmtDate(fromV) : '…') + ' → ' + (toV ? fmtDate(toV) : '…');
 
+    // Group by the actual item (its id), not the exact spelling saved with each sale —
+    // so an item whose name was typed/edited slightly differently over time (e.g.
+    // "Fu zok roll" vs "Fu Zok roll") still shows as one line.
     var byItem = {};
     var order = [];
     rangeSales.forEach(function(o){
-      if(!byItem[o.item]){ byItem[o.item] = {name: o.item, qty: 0, revenue: 0, sales: []}; order.push(o.item); }
-      byItem[o.item].qty += o.qty;
-      byItem[o.item].revenue += o.qty * o.price;
-      byItem[o.item].sales.push(o);
+      var inv = o.itemId ? data.inventory.find(function(i){ return i.id === o.itemId; }) : findInv(o.item || '');
+      var key = inv ? ('id:' + inv.id) : ('n:' + String(o.item || '').trim().toLowerCase().replace(/\s+/g, ' '));
+      if(!byItem[key]){ byItem[key] = {name: inv ? label(inv) : o.item, qty: 0, revenue: 0, sales: []}; order.push(key); }
+      byItem[key].qty += o.qty;
+      byItem[key].revenue += o.qty * o.price;
+      byItem[key].sales.push(o);
     });
     var listEl = document.getElementById('salesList');
     var countEl = document.getElementById('salesCount');
@@ -1406,12 +1715,12 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     labelEl.innerHTML = 'Sold — ' + esc(rangeText) + '<span class="count" id="salesCount">' + items.length + '</span>';
     countEl = document.getElementById('salesCount');
     if(!items.length){
-      listEl.innerHTML = '<div class="empty-note">Nothing sold in this range. 这个日期范围内没有销售记录。</div>';
+      listEl.innerHTML = archiveNoteHtml(salesMissing) + '<div class="empty-note">Nothing sold in this range. 这个日期范围内没有销售记录。</div>';
       return;
     }
     var summaryRow = '<div style="display:flex; justify-content:space-between; font-weight:700; padding:2px 2px 10px; font-size:.9rem;">' +
       '<span>Total 总数量: ' + totalQty + '</span><span>' + fmt(totalRevenue) + '</span></div>';
-    listEl.innerHTML = summaryRow + items.map(function(it){
+    listEl.innerHTML = archiveNoteHtml(salesMissing) + summaryRow + items.map(function(it){
       var inv = findInv(it.name);
       var unit = inv ? inv.unit : '';
       var rows = it.sales.slice().sort(function(a,b){ return (a.date+((a.time)||'')).localeCompare(b.date+((b.time)||'')); }).map(function(o){
@@ -1504,6 +1813,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       // this is a pure correction — it only fixes the displayed stall number, and
       // deliberately does NOT touch the warehouse (bringing/returning stock has its
       // own buttons above, which do the warehouse math)
+      logManualCorrection(item, 'stall', item.qty, qty);
       item.qty = qty;
       save();
       renderAll();
@@ -1518,9 +1828,22 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   }
 
   // ---- warehouse (buy from supplier, then bring stock out to the stall) ----
-  function buySupplierStock(item, qty){
+  // Every hand-typed correction of a stock number leaves a permanent note in Stock
+  // history, so if numbers ever don't add up later you can see when and what was changed.
+  function logManualCorrection(item, where, from, to){
+    if(from === to) return;
+    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:Math.round((to - from)*100)/100, unit:item.unit,
+      date:todayStr(), time:new Date().toISOString(), type:'adjust', where:where, from:from, to:to});
+  }
+
+  function buySupplierStock(item, qty, batchCost){
+    // Optional cost for this batch (e.g. today's tong sui). Past sales keep the cost they
+    // were sold at, so changing it here only affects what's sold from now on.
+    if(batchCost != null && !isNaN(batchCost) && batchCost >= 0) item.unitCost = batchCost;
     item.warehouseQty += qty;
-    data.restocks.push({id:uid('r'), itemId:item.id, itemName:label(item), qty:qty, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'buy'});
+    var buyRec = {id:uid('r'), itemId:item.id, itemName:label(item), qty:qty, unit:item.unit, date:todayStr(), time:new Date().toISOString(), type:'buy'};
+    if(batchCost != null && !isNaN(batchCost) && batchCost >= 0) buyRec.batchCost = batchCost;
+    data.restocks.push(buyRec);
     save();
     closeModal();
     renderAll();
@@ -1618,6 +1941,8 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
             '<input class="big-input" id="buyCustom" type="number" inputmode="numeric" min="1" step="1" placeholder="Other qty">' +
             '<button class="btn-ghost" type="button" id="buyCustomGo">Add to warehouse</button>' +
           '</div>' +
+          '<div class="field" style="margin-top:6px;"><label for="buyBatchCost">Cost per ' + esc(item.unit) + ' for this batch (optional) 这批每' + esc(item.unit) + '成本（可不填）</label>' +
+            '<input class="big-input" id="buyBatchCost" type="number" inputmode="decimal" min="0" step="0.01" placeholder="' + (item.unitCost ? 'RM ' + item.unitCost + ' (same as last time 跟上次一样)' : 'RM') + '"></div>' +
 
           '<div class="muted-small" style="margin:4px 0 0;">To bring stock out to the stall, go to the Stall tab and tap "🚚 Bring to stall" on this item. 要把货带去摊位，去 Stall 分页点这个品项的「🚚 带去摊位」。</div>' +
 
@@ -1666,12 +1991,18 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       goToView(returnView);
     });
     root.querySelectorAll('[data-buy]').forEach(function(btn){
-      btn.addEventListener('click', function(){ buySupplierStock(item, parseInt(btn.dataset.buy, 10)); });
+      btn.addEventListener('click', function(){ buySupplierStock(item, parseInt(btn.dataset.buy, 10), readBatchCost()); });
     });
+    function readBatchCost(){
+      var el = document.getElementById('buyBatchCost');
+      if(!el || el.value === '') return null;
+      var c = parseFloat(el.value);
+      return (isNaN(c) || c < 0) ? null : c;
+    }
     document.getElementById('buyCustomGo').addEventListener('click', function(){
       var n = parseInt(document.getElementById('buyCustom').value, 10);
       if(!n || n < 1){ document.getElementById('buyCustom').focus(); return; }
-      buySupplierStock(item, n);
+      buySupplierStock(item, n, readBatchCost());
     });
     function refreshWhModalSub(){
       var subEl = document.getElementById('whModalSub');
@@ -1693,6 +2024,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     document.getElementById('whQtySave').addEventListener('click', function(){
       var qty = parseFloat(document.getElementById('whEditWarehouseQty').value);
       if(isNaN(qty) || qty < 0) return;
+      logManualCorrection(item, 'warehouse', item.warehouseQty, qty);
       item.warehouseQty = qty;
       save();
       renderAll();
@@ -1817,7 +2149,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var price = parseFloat(document.getElementById('orderPrice').value);
     var costRaw = document.getElementById('orderCost').value;
     var cost = costRaw === '' ? 0 : parseFloat(costRaw);
-    if(!item || isNaN(qty) || isNaN(price)) return;
+    if(!item || isNaN(qty) || isNaN(price) || qty <= 0 || price < 0) return;
     var inv = findInv(item);
     // If the typed name doesn't match an inventory item exactly, stock can't be deducted —
     // ask before logging so revenue and stock never silently drift apart.
@@ -1825,8 +2157,9 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       var proceed = confirm('"' + item + '" doesn\'t match any item in your inventory list, so stock won\'t be deducted for this sale. Log it anyway?\n\n"' + item + '" 跟库存里的品项对不上,这笔不会扣库存。还是要记录吗？\n\n(Tip: pick a name from the dropdown list to avoid this. 提示：从下拉选单选择品项名字就不会有这个问题。)');
       if(!proceed) return;
     }
-    data.orders.push({id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:item, qty:qty, price:price, cost:cost});
-    if(inv) inv.qty = Math.max(0, inv.qty - qty);
+    data.orders.push({id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:item, itemId: inv ? inv.id : undefined, qty:qty, price:price, cost:cost});
+    var tookQ = inv ? takeStock(inv, qty) : null;
+    if(tookQ && (tookQ.fromWarehouse > 0 || tookQ.short > 0)) flash('✓ Logged' + takeStockNote(tookQ));
     save();
     this.reset();
     document.getElementById('orderQty').value = 1;
@@ -2264,8 +2597,27 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     });
   }
 
+  // Takes sold/used stock from the stall first, then from the warehouse if the stall
+  // doesn't have enough (e.g. more was brought out than was recorded, or the 3am
+  // auto-return already moved leftovers back). Returns how much came from where.
+  function takeStock(inv, qty){
+    var fromStall = Math.min(Math.max(inv.qty, 0), qty);
+    var rest = qty - fromStall;
+    var fromWarehouse = Math.min(Math.max(inv.warehouseQty || 0, 0), rest);
+    inv.qty = inv.qty - fromStall;
+    inv.warehouseQty = (inv.warehouseQty || 0) - fromWarehouse;
+    return {fromStall: fromStall, fromWarehouse: fromWarehouse, short: rest - fromWarehouse};
+  }
+  function takeStockNote(t, unit){
+    if(!t || (t.fromWarehouse <= 0 && t.short <= 0)) return '';
+    var msg = '';
+    if(t.fromWarehouse > 0) msg += ' · stall had only ' + t.fromStall + ', took ' + t.fromWarehouse + ' from warehouse 摊位只有 ' + t.fromStall + '，另外 ' + t.fromWarehouse + ' 从仓库扣';
+    if(t.short > 0) msg += ' · ⚠ ' + t.short + ' more than in stock 库存不够 ' + t.short + '，请检查数量';
+    return msg;
+  }
+
   function serveLine(line, order){
-    var sale = {id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:line.itemName, qty:line.qty, price:line.price, cost:line.cost,
+    var sale = {id:uid('o'), date:todayStr(), time:new Date().toISOString(), item:line.itemName, itemId:line.itemId, qty:line.qty, price:line.price, cost:line.cost,
       orderId: order ? order.id : undefined, orderName: order ? order.name : undefined,
       // If this order was already marked paid before this particular item got served
       // (e.g. paid upfront, food comes out after), carry that payment method over
@@ -2273,13 +2625,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       paymentMethod: order ? order.paymentMethod : undefined};
     data.orders.push(sale);
     var inv = data.inventory.find(function(i){ return i.id === line.itemId; });
-    if(inv) inv.qty = Math.max(0, inv.qty - line.qty);
+    var took = inv ? takeStock(inv, line.qty) : null;
     line.served = true;
     line.saleId = sale.id;
     line.serveTime = sale.time;
     save();
     renderAll();
-    flash('✓ ' + line.itemName + ' served');
+    flash('✓ ' + line.itemName + ' served' + takeStockNote(took));
   }
 
   function unserveLine(line){
@@ -2633,6 +2985,18 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
   document.getElementById('backupDataBtn').addEventListener('click', function(){
     try{
       var payload = JSON.stringify(realData, null, 2);
+      var fname = 'jm-chef-delight-backup-' + todayStr() + '.json';
+      // On the iPad home-screen app, a normal download often doesn't work — use the share
+      // sheet instead, which can send the file straight to WhatsApp / Files / Google Drive.
+      try{
+        var file = new File([payload], fname, {type:'application/json'});
+        if(navigator.canShare && navigator.canShare({files:[file]})){
+          navigator.share({files:[file], title:'JM Chef Delight backup 备份'}).then(function(){
+            flash('✓ Backup shared 备份已分享');
+          }).catch(function(){});
+          return;
+        }
+      }catch(shareErr){}
       var blob = new Blob([payload], {type:'application/json'});
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -2670,7 +3034,13 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       testMode = false;
       realData = runMigrations(parsed);
       data = realData;
-      try{ localStorage.setItem(STORE_KEY, JSON.stringify(realData)); }catch(err){}
+      // An intentional restore may hold fewer records than the cloud copy — allow that one
+      // upload, and if this iPad was waiting for the cloud, the backup file replaces that wait.
+      allowShrinkOnce = true;
+      needsCloudFirst = false;
+      localLoadFailed = false;
+      hideCloudGate();
+      setSyncBlocked(false);
       save();
       updateTestBanner();
       renderAll();
@@ -2711,6 +3081,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     var today = todayStr();
     var all = data.wastage.slice().sort(function(a,b){ return b.id.localeCompare(a.id); });
     document.getElementById('wasteCount').textContent = all.filter(function(w){ return w.date === today; }).length;
+    var archNote = (data.archivedMonths && data.archivedMonths.length) ? '<div class="muted-small" style="margin-bottom:8px;">📦 Records before ' + esc(oldestKeptMonth()) + ' are stored in the cloud (totals still count them). 更早的记录已存到云端（总数照样算进去）。</div>' : '';
     if(!all.length){
       list.innerHTML = '<div class="empty-note">No wastage logged yet. Nice. 还没有损耗记录。</div>';
       return;
@@ -2722,7 +3093,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(!groups[w.date]){ groups[w.date] = []; dateOrder.push(w.date); }
       groups[w.date].push(w);
     });
-    list.innerHTML = dateOrder.map(function(date){
+    list.innerHTML = archNote + dateOrder.map(function(date){
       var entries = groups[date];
       var totalLoss = entries.reduce(function(s, w){ return s + w.qty * (w.unitCost || 0); }, 0);
       var isToday = date === today;
@@ -2734,7 +3105,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
           '<div class="main"><div class="t">' + esc(displayName) + '</div>' +
           '<div class="s">' + w.qty + ' · ' + esc(w.reason) + '</div></div>' +
           '<div class="right"><span class="amt bad">-' + fmt(loss) + '</span>' +
-          '<button class="del-btn" data-del-waste="' + w.id + '" title="Remove">✕</button></div></div>';
+          // only today's entries can be removed (a same-day typo); older days are locked so
+          // an old record can't be deleted and throw today's stock numbers off
+          (isToday ? '<button class="del-btn" data-del-waste="' + w.id + '" title="Remove (logged by mistake) 记错了，删除">✕</button>' : '') +
+          '</div></div>';
       }).join('');
       return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
         '<summary>' + fmtDate(date) + (isToday ? ' · Today 今天' : '') + ' — ' + entries.length + ' · -' + fmt(totalLoss) + '</summary>' +
@@ -2757,22 +3131,42 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(otherText) reason = otherText;
     }
     var inv = data.inventory.find(function(i){ return i.id === itemId; });
-    if(!inv || isNaN(qty)) return;
+    if(!inv || isNaN(qty) || qty <= 0){ flash('⚠ Enter how many 请输入数量'); return; }
     var unitCost = inv.unitCost || 0;
-    inv.qty = Math.max(0, inv.qty - qty);
-    data.wastage.push({id:uid('w'), date:todayStr(), item:label(inv), itemId:inv.id, qty:qty, unitCost:unitCost, reason:reason});
+    // Take it from the stall first. If the stall doesn't have enough (e.g. the 3am
+    // auto-return already moved leftovers back to the warehouse before this was logged),
+    // take the rest from the warehouse — previously the remainder was silently dropped,
+    // so the warehouse kept counting food that had actually been eaten/thrown away.
+    var tookW = takeStock(inv, qty);
+    var fromStall = tookW.fromStall, fromWarehouse = tookW.fromWarehouse, notFound = tookW.short;
+    data.wastage.push({id:uid('w'), date:todayStr(), item:label(inv), itemId:inv.id, qty:qty, unitCost:unitCost, reason:reason, fromStall:fromStall, fromWarehouse:fromWarehouse});
     save();
     this.reset();
     document.getElementById('wasteOtherWrap').hidden = true;
     renderAll();
-    flash('✓ Logged wastage — ' + qty + ' ' + inv.unit + ' deducted from stall stock');
+    var where = fromWarehouse > 0
+      ? (fromStall > 0 ? (fromStall + ' from stall 摊位 + ' + fromWarehouse + ' from warehouse 仓库') : (fromWarehouse + ' from warehouse 仓库 (stall was empty 摊位没有)'))
+      : (fromStall + ' from stall 摊位');
+    flash('✓ Logged wastage 已记录损耗 — ' + where + (notFound > 0 ? ' · ⚠ ' + notFound + ' not in stock 库存不够' : ''));
   });
 
   document.getElementById('wasteList').addEventListener('click', function(e){
     var btn = e.target.closest('[data-del-waste]');
     if(!btn) return;
     var w = data.wastage.find(function(x){ return x.id === btn.dataset.delWaste; });
+    if(w && w.date !== todayStr()){ flash('Older records can\'t be deleted — fix the number with "Correct qty" instead 以前的记录不能删，请用「更正数量」'); return; }
     var undoSnapWaste = snapshotForUndo();
+    // Deleting a wastage record means it was logged by mistake — put the stock back where
+    // it was taken from. Older records (before this was tracked) came from the stall.
+    if(w){
+      var wInv = data.inventory.find(function(i){ return i.id === w.itemId; });
+      if(wInv){
+        var backStall = (w.fromStall != null) ? w.fromStall : w.qty;
+        var backWh = w.fromWarehouse || 0;
+        wInv.qty += backStall;
+        wInv.warehouseQty = (wInv.warehouseQty || 0) + backWh;
+      }
+    }
     data.wastage = data.wastage.filter(function(x){ return x.id !== btn.dataset.delWaste; });
     save(); renderAll();
     showUndoToast('Removed wastage record 已删除记录' + (w ? ' — ' + w.item : ''), undoSnapWaste);
@@ -2885,7 +3279,16 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       inRange = function(d){ return d === dashRangeValue; };
       rangeLabel = fmtDate(dashRangeValue);
     }
-    var rangeOrders = data.orders.filter(function(o){ return inRange(o.date); });
+    // months already moved to the cloud archive that this range covers
+    var dashMonths;
+    if(dashRangeValue === 'all') dashMonths = (data.archivedMonths || []).slice();
+    else if(dashRangeValue === 'today' || dashRangeValue === 'month') dashMonths = [];
+    else if(dashRangeValue === 'custom') dashMonths = archivedMonthsBetween(document.getElementById('dashFrom').value, document.getElementById('dashTo').value);
+    else dashMonths = archivedMonthsBetween(dashRangeValue, dashRangeValue);
+    var dashMissing = ensureArchiveLoaded(dashMonths);
+    var noteEl = document.getElementById('dashArchiveNote');
+    if(noteEl) noteEl.innerHTML = archiveNoteHtml(dashMissing);
+    var rangeOrders = historyList('orders', dashMonths).filter(function(o){ return inRange(o.date); });
     renderPaymentBreakdown(rangeOrders);
     var revenue = rangeOrders.reduce(function(s,o){ return s + o.qty*o.price; }, 0);
     var cost = rangeOrders.reduce(function(s,o){ return s + o.qty*(o.cost||0); }, 0);
@@ -2904,7 +3307,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     tile.classList.toggle('negative', profit < 0);
     document.getElementById('profitSub').textContent = rangeOrders.length + ' sale' + (rangeOrders.length===1?'':'s') + ' logged';
 
-    var wasteTotal = data.wastage.filter(function(w){ return inRange(w.date); })
+    var wasteTotal = historyList('wastage', dashMonths).filter(function(w){ return inRange(w.date); })
       .reduce(function(s,w){ return s + w.qty*(w.unitCost||0); }, 0);
     document.getElementById('sumWaste').textContent = fmt(wasteTotal);
 
@@ -3162,20 +3565,35 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
       if(!groups[r.date]){ groups[r.date] = []; dateOrder.push(r.date); }
       groups[r.date].push(r);
     });
-    list.innerHTML = dateOrder.map(function(date){
+    var archNoteR = (data.archivedMonths && data.archivedMonths.length) ? '<div class="muted-small" style="margin-bottom:8px;">📦 Records before ' + esc(oldestKeptMonth()) + ' are stored in the cloud. 更早的记录已存到云端。</div>' : '';
+    list.innerHTML = archNoteR + dateOrder.map(function(date){
       var entries = groups[date];
       var isToday = date === today;
       var rowsHtml = entries.map(function(r){
         var t = fmtTime(r.time);
+        if(r.type === 'adjust'){
+          // manual correction — a permanent note of what was changed, never editable
+          var whereLbl = r.where === 'warehouse' ? 'warehouse 仓库' : 'stall 摊位';
+          return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
+            '<div class="s">✎ Manual correction 手动更正 · ' + whereLbl + ' ' + r.from + ' → ' + r.to + (t ? ' · ' + t : '') + '</div></div>' +
+            '<div class="right"><span class="amt">' + (r.qty > 0 ? '+' : '') + r.qty + ' ' + esc(r.unit) + '</span></div></div>';
+        }
         var icon = r.type === 'bring' ? '🚚' : (r.type === 'return' ? '↩' : '🛒');
         var actionLabel = r.type === 'bring' ? 'Brought to stall 带去摆摊' : (r.type === 'return' ? 'Returned to warehouse 退回仓库' : 'Bought from supplier 进货');
         if(r.auto) actionLabel += ' · auto 3am 自动';
+        if(r.type === 'buy' && r.batchCost != null) actionLabel += ' · cost 成本 ' + fmt(r.batchCost);
         var sign = r.type === 'return' ? '' : '+';
+        // only today's records can be fixed/removed (a same-day typo). Changing an old record
+        // would re-apply its effect to TODAY's stock, which is almost never what's meant.
+        var editable = r.date === today;
         return '<div class="item-row"><div class="main"><div class="t">' + esc(r.itemName) + '</div>' +
           '<div class="s">' + icon + ' ' + actionLabel + (t ? ' · ' + t : '') + '</div></div>' +
           '<div class="right" style="display:flex; align-items:center; gap:8px;"><span class="amt good">' + sign + r.qty + ' ' + esc(r.unit) + '</span>' +
-          '<button class="btn-ghost" type="button" data-edit-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;" title="Edit amount 改数量">✎</button>' +
-          '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button></div></div>';
+          (editable
+            ? '<button class="btn-ghost" type="button" data-edit-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;" title="Edit amount 改数量">✎</button>' +
+              '<button class="btn-danger" type="button" data-del-restock="' + r.id + '" style="padding:5px 9px; font-size:.72rem;">🗑</button>'
+            : '') +
+          '</div></div>';
       }).join('');
       return '<details class="manual-entry" style="box-shadow:none; margin-bottom:6px;"' + (isToday ? ' open' : '') + '>' +
         '<summary>' + fmtDate(date) + (isToday ? ' · Today 今天' : '') + ' — ' + entries.length + '</summary>' +
@@ -3189,6 +3607,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(editBtn){
       var r = data.restocks.find(function(x){ return x.id === editBtn.dataset.editRestock; });
       if(!r) return;
+      if(r.type === 'adjust' || r.date !== todayStr()){ flash('Older records can\'t be changed — use "Correct qty" instead 以前的记录不能改，请用「更正数量」'); return; }
       var raw = prompt('Correct the amount for ' + r.itemName + '\n更正 ' + r.itemName + ' 的数量\n\n(currently ' + r.qty + ' ' + r.unit + ')', r.qty);
       if(raw == null) return;
       var newQty = parseFloat(raw);
@@ -3227,6 +3646,7 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     if(!btn) return;
     var r = data.restocks.find(function(x){ return x.id === btn.dataset.delRestock; });
     if(!r) return;
+    if(r.type === 'adjust' || r.date !== todayStr()){ flash('Older records can\'t be deleted — use "Correct qty" instead 以前的记录不能删，请用「更正数量」'); return; }
     if(!confirm('Delete this record and undo it? ' + r.itemName + ' ' + (r.type === 'return' ? '-' : '+') + r.qty + ' ' + r.unit + ' will be reversed.\n\n删除这条记录并撤销？' + r.itemName + ' 的数量会自动改回去。')) return;
     var undoSnapRestock = snapshotForUndo();
     var item = data.inventory.find(function(i){ return i.id === r.itemId; });
@@ -3301,12 +3721,10 @@ details.manual-entry form{padding:0 16px 16px; border:none; box-shadow:none; bor
     renderViewSpecific(currentViewName());
   }
   renderAll();
-  try{ localStorage.setItem(STORE_KEY, JSON.stringify(data)); }catch(e){}
-  if(localLoadFailed){
-    setTimeout(function(){
-      alert('⚠ Could not read your saved data on this device — showing a fresh copy instead. If you have a cloud backup on another device, this should recover automatically in a moment; if not, please tell your daughter.\n\n⚠ 这台设备读不到之前存的资料，现在显示的是全新的一份。如果其他设备上有云端备份，等一下应该会自动恢复；如果没有，请告诉女儿。');
-    }, 300);
-  }
+  // Only write to this iPad's storage once it holds real data — a fresh/empty copy must
+  // never be saved locally, or the next launch would treat it as the real records.
+  if(!needsCloudFirst) persistLocal();
+  else showCloudGate('loading');
   pullFromCloud();
 
   // Periodically re-check the cloud so two devices open at the same time (e.g. mom's
